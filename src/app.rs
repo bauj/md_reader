@@ -2,7 +2,7 @@ use egui::{CentralPanel, Key, ScrollArea, SidePanel, TextEdit, TopBottomPanel};
 use std::collections::HashSet;
 use std::path::PathBuf;
 use crate::fs::FsTree;
-use crate::markdown::{parse_markdown, ParsedDoc};
+use crate::markdown::{parse_markdown, Highlighter, ParsedDoc};
 use crate::ui::{render_outline, render_sidebar};
 
 #[derive(PartialEq, Clone, Copy)]
@@ -32,6 +32,8 @@ pub struct App {
     tabs:       Vec<OpenTab>,
     active_tab: Option<usize>,
 
+    highlighter: Highlighter,
+
     view_mode: ViewMode,
 
     pending_action: Option<PendingAction>,
@@ -54,6 +56,7 @@ impl App {
             tree:              FsTree::default(),
             tabs:              Vec::new(),
             active_tab:        None,
+            highlighter:       Highlighter::new(),
             view_mode:         ViewMode::Preview,
             pending_action:    None,
             outline_open:      true,
@@ -437,34 +440,33 @@ impl eframe::App for App {
                 Some(idx) => match self.view_mode {
                     ViewMode::Preview => {
                         let tab = &self.tabs[idx];
-                        render_preview(ui, &tab.parsed_doc, &tab.buffer, scroll_to, "preview");
+                        render_preview(ui, &tab.parsed_doc, &tab.buffer, scroll_to, "preview", &mut self.highlighter);
                     }
                     ViewMode::Edit => {
                         let tab = &mut self.tabs[idx];
                         render_editor(ui, &mut tab.buffer, &mut tab.modified, &mut tab.needs_reparse, "editor");
                     }
                     ViewMode::Split => {
+                        // Borrow separate fields before the closure so Rust
+                        // captures them independently (Rust 2021 fine-grained capture).
+                        let tab = &mut self.tabs[idx];
+                        let hl  = &mut self.highlighter;
                         ui.columns(2, |cols| {
-                            {
-                                let tab = &mut self.tabs[idx];
-                                render_editor(
-                                    &mut cols[0],
-                                    &mut tab.buffer,
-                                    &mut tab.modified,
-                                    &mut tab.needs_reparse,
-                                    "split_editor",
-                                );
-                            }
-                            {
-                                let tab = &self.tabs[idx];
-                                render_preview(
-                                    &mut cols[1],
-                                    &tab.parsed_doc,
-                                    &tab.buffer,
-                                    scroll_to,
-                                    "split_preview",
-                                );
-                            }
+                            render_editor(
+                                &mut cols[0],
+                                &mut tab.buffer,
+                                &mut tab.modified,
+                                &mut tab.needs_reparse,
+                                "split_editor",
+                            );
+                            render_preview(
+                                &mut cols[1],
+                                &tab.parsed_doc,
+                                &tab.buffer,
+                                scroll_to,
+                                "split_preview",
+                                hl,
+                            );
                         });
                     }
                 },
@@ -479,13 +481,14 @@ fn render_preview(
     buffer: &str,
     scroll_to: Option<usize>,
     id: &str,
+    hl: &mut Highlighter,
 ) {
     ScrollArea::vertical()
         .id_salt(id)
         .auto_shrink([false; 2])
         .show(ui, |ui| {
             if let Some(doc) = doc {
-                crate::markdown::render_markdown(ui, doc, scroll_to);
+                crate::markdown::render_markdown(ui, doc, scroll_to, hl);
             } else if !buffer.is_empty() {
                 ui.label("Failed to parse markdown.");
             } else {

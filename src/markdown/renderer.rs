@@ -1,11 +1,18 @@
-use egui::{Color32, Frame, RichText, Ui};
+use egui::{Color32, Frame, FontId, RichText, TextFormat, Ui};
+use egui::text::LayoutJob;
 use egui_extras::{Column, TableBuilder};
 use crate::markdown::{Block, Inline, ParsedDoc};
+use crate::markdown::highlight::Highlighter;
 
-pub fn render_markdown(ui: &mut Ui, doc: &ParsedDoc, scroll_to: Option<usize>) {
+pub fn render_markdown(
+    ui:        &mut Ui,
+    doc:       &ParsedDoc,
+    scroll_to: Option<usize>,
+    hl:        &mut Highlighter,
+) {
     for (i, block) in doc.blocks.iter().enumerate() {
         ui.push_id(i, |ui| {
-            render_block(ui, block);
+            render_block(ui, block, hl);
             if scroll_to == Some(i) {
                 ui.scroll_to_cursor(Some(egui::Align::TOP));
             }
@@ -14,7 +21,7 @@ pub fn render_markdown(ui: &mut Ui, doc: &ParsedDoc, scroll_to: Option<usize>) {
     }
 }
 
-fn render_block(ui: &mut Ui, block: &Block) {
+fn render_block(ui: &mut Ui, block: &Block, hl: &mut Highlighter) {
     match block {
         Block::Heading(level, inlines) => {
             let size = match level {
@@ -44,6 +51,25 @@ fn render_block(ui: &mut Ui, block: &Block) {
         }
 
         Block::CodeBlock(lang, code) => {
+            let lines = hl.highlight(lang, code);
+
+            // Build a LayoutJob so mixed-color spans render as a single label,
+            // preserving newlines and indentation faithfully.
+            let mut job = LayoutJob::default();
+            for line_spans in lines {
+                for (color, text) in line_spans {
+                    job.append(
+                        text,
+                        0.0,
+                        TextFormat {
+                            font_id: FontId::monospace(13.0),
+                            color:   *color,
+                            ..Default::default()
+                        },
+                    );
+                }
+            }
+
             Frame::canvas(&ui.style())
                 .fill(Color32::from_gray(28))
                 .inner_margin(egui::Margin::symmetric(10, 8))
@@ -58,13 +84,12 @@ fn render_block(ui: &mut Ui, block: &Block) {
                         );
                         ui.add_space(2.0);
                     }
-                    ui.monospace(code.trim_end_matches('\n'));
+                    ui.label(job);
                 });
         }
 
         Block::BlockQuote(inlines) => {
             ui.horizontal(|ui| {
-                // Left accent bar
                 let (rect, _) = ui.allocate_exact_size(
                     egui::vec2(3.0, ui.spacing().interact_size.y.max(16.0)),
                     egui::Sense::hover(),
@@ -74,12 +99,7 @@ fn render_block(ui: &mut Ui, block: &Block) {
                 ui.vertical(|ui| {
                     ui.horizontal_wrapped(|ui| {
                         for inline in inlines {
-                            render_inline(
-                                ui,
-                                inline,
-                                None,
-                                false,
-                            );
+                            render_inline(ui, inline, None, false);
                         }
                     });
                 });
@@ -125,13 +145,11 @@ fn render_block(ui: &mut Ui, block: &Block) {
                         .body(|mut body| {
                             for data_row in rows {
                                 body.row(20.0, |mut row| {
-                                    for (j, cell) in data_row.iter().enumerate() {
-                                        let _ = j;
+                                    for cell in data_row.iter() {
                                         row.col(|ui| {
                                             ui.label(cell.as_str());
                                         });
                                     }
-                                    // pad missing cells
                                     for _ in data_row.len()..col_count {
                                         row.col(|_| {});
                                     }

@@ -1,4 +1,5 @@
 use egui::{CentralPanel, Key, ScrollArea, SidePanel, TextEdit, TopBottomPanel};
+use std::collections::HashSet;
 use std::path::PathBuf;
 use crate::fs::FsTree;
 use crate::markdown::{parse_markdown, ParsedDoc};
@@ -35,6 +36,7 @@ pub struct App {
 
     // Outline panel
     outline_open: bool,
+    outline_collapsed: HashSet<usize>,
     scroll_to_block: Option<usize>,
 }
 
@@ -50,6 +52,7 @@ impl Default for App {
             view_mode: ViewMode::Preview,
             pending_action: None,
             outline_open: true,
+            outline_collapsed: HashSet::new(),
             scroll_to_block: None,
         }
     }
@@ -288,7 +291,7 @@ impl eframe::App for App {
 
                         // Outline panel — only shown when a doc is parsed
                         if let Some(ref doc) = self.parsed_doc {
-                            if let Some(block_idx) = render_outline(ui, doc, &mut self.outline_open) {
+                            if let Some(block_idx) = render_outline(ui, doc, &mut self.outline_open, &mut self.outline_collapsed) {
                                 self.scroll_to_block = Some(block_idx);
                             }
                         }

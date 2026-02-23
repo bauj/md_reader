@@ -2,9 +2,14 @@ use egui::{Color32, Frame, RichText, Ui};
 use egui_extras::{Column, TableBuilder};
 use crate::markdown::{Block, Inline, ParsedDoc};
 
-pub fn render_markdown(ui: &mut Ui, doc: &ParsedDoc) {
-    for block in &doc.blocks {
-        render_block(ui, block);
+pub fn render_markdown(ui: &mut Ui, doc: &ParsedDoc, scroll_to: Option<usize>) {
+    for (i, block) in doc.blocks.iter().enumerate() {
+        ui.push_id(i, |ui| {
+            render_block(ui, block);
+            if scroll_to == Some(i) {
+                ui.scroll_to_cursor(Some(egui::Align::TOP));
+            }
+        });
         ui.add_space(4.0);
     }
 }

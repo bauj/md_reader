@@ -137,6 +137,13 @@ polished toolbar, keyboard shortcuts, and an in-document navigation panel.
   - Use `egui::CentralPanel` split manually with two `egui::ScrollArea` columns
   - Or use `egui_extras` / manual `ui.columns(2, ...)` for a resizable divider
   - Keep scroll positions independent; optionally sync them (toggle option)
+- **Bug fix — Split view independent scrolling:**
+  - Currently both panes scroll together because `ui.columns()` shares the same
+    parent `ScrollArea` context and egui routes scroll events to both
+  - Fix: give each pane its own `ScrollArea` with a unique `id_source`, so egui
+    tracks their scroll positions separately
+  - Each `ScrollArea` should only respond to scroll events when the pointer is
+    hovering over it (`ui.rect_contains_pointer(ui.min_rect())`)
 - Toolbar refinements:
   - Show current file name (or "No file open")
   - Show modified indicator (`●`)
@@ -146,7 +153,13 @@ polished toolbar, keyboard shortcuts, and an in-document navigation panel.
   - `Ctrl+O` — open folder
   - `Ctrl+N` — new file (prompts for name in sidebar or dialog)
   - `Ctrl+W` — close current file *(implemented in Phase 3)*
-  - `Ctrl+[` / `Ctrl+]` — cycle sidebar selection up/down (keyboard navigation)
+  - `Ctrl+PageUp` / `Ctrl+PageDown` — cycle to previous/next file in the sidebar
+  - `Ctrl+Q` — quit the app:
+    - If `modified == true`, show the unsaved-changes dialog before exiting
+    - On Save: save the file, then close the app
+    - On Discard: close the app immediately
+    - On Cancel: abort the quit
+    - If no unsaved changes, exit immediately via `ctx.send_viewport_cmd(ViewportCommand::Close)`
 - New file creation:
   - Prompt for filename inline in the sidebar (editable text field appears)
   - Create the file on disk and open it in the editor

@@ -2,7 +2,7 @@ use egui::{CentralPanel, Key, ScrollArea, SidePanel, TextEdit, TopBottomPanel};
 use std::path::PathBuf;
 use crate::fs::FsTree;
 use crate::markdown::{parse_markdown, ParsedDoc};
-use crate::ui::render_sidebar;
+use crate::ui::{render_outline, render_sidebar};
 
 #[derive(PartialEq, Clone, Copy)]
 pub enum ViewMode {
@@ -15,6 +15,7 @@ pub enum ViewMode {
 enum PendingAction {
     LoadFile(PathBuf),
     CloseFile,
+    Quit,
 }
 
 pub struct App {
@@ -31,6 +32,10 @@ pub struct App {
 
     /// Set when the user triggers an action that requires discarding/saving first.
     pending_action: Option<PendingAction>,
+
+    // Outline panel
+    outline_open: bool,
+    scroll_to_block: Option<usize>,
 }
 
 impl Default for App {
@@ -44,6 +49,8 @@ impl Default for App {
             needs_reparse: false,
             view_mode: ViewMode::Preview,
             pending_action: None,
+            outline_open: true,
+            scroll_to_block: None,
         }
     }
 }
@@ -83,17 +90,17 @@ impl App {
 
     /// Call this whenever the user wants to do something that requires a clean state.
     /// If there are unsaved changes, stores the action for after the dialog.
-    /// Returns `true` if the action can proceed immediately (no unsaved changes).
+    /// Returns `true` if the app should quit immediately (Quit with no unsaved changes).
     fn request_action(&mut self, action: PendingAction) -> bool {
         if self.modified {
             self.pending_action = Some(action);
             false
         } else {
             match action {
-                PendingAction::LoadFile(path) => self.load_file(path),
-                PendingAction::CloseFile      => self.close_file(),
+                PendingAction::LoadFile(path) => { self.load_file(path); false }
+                PendingAction::CloseFile      => { self.close_file(); false }
+                PendingAction::Quit           => true,
             }
-            true
         }
     }
 
@@ -138,18 +145,41 @@ impl eframe::App for App {
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(self.window_title()));
 
         // ── Keyboard shortcuts ────────────────────────────────────────────
-        let ctrl_s = ctx.input(|i| i.key_pressed(Key::S) && i.modifiers.ctrl);
-        let ctrl_o = ctx.input(|i| i.key_pressed(Key::O) && i.modifiers.ctrl);
-        let ctrl_w = ctx.input(|i| i.key_pressed(Key::W) && i.modifiers.ctrl);
+        let ctrl_s     = ctx.input(|i| i.key_pressed(Key::S)         && i.modifiers.ctrl);
+        let ctrl_o     = ctx.input(|i| i.key_pressed(Key::O)         && i.modifiers.ctrl);
+        let ctrl_w     = ctx.input(|i| i.key_pressed(Key::W)         && i.modifiers.ctrl);
+        let ctrl_n     = ctx.input(|i| i.key_pressed(Key::N)         && i.modifiers.ctrl);
+        let ctrl_q     = ctx.input(|i| i.key_pressed(Key::Q)         && i.modifiers.ctrl);
+        let ctrl_left  = ctx.input(|i| i.key_pressed(Key::PageUp)    && i.modifiers.ctrl);
+        let ctrl_right = ctx.input(|i| i.key_pressed(Key::PageDown)  && i.modifiers.ctrl);
 
         if ctrl_s { self.save_file(); }
-
         if ctrl_w { self.request_action(PendingAction::CloseFile); }
+        if ctrl_q && self.request_action(PendingAction::Quit) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+
+        if ctrl_n { self.create_new_file(); }
 
         if ctrl_o {
             if let Some(path) = rfd::FileDialog::new().pick_folder() {
                 self.tree = FsTree::new(path);
-                // Don't close the current file — just refresh the tree
+            }
+        }
+
+        if ctrl_left || ctrl_right {
+            let files = self.tree.all_files();
+            if !files.is_empty() {
+                let current_idx = self.current_file.as_ref()
+                    .and_then(|p| files.iter().position(|f| f == p));
+                let next_idx = match current_idx {
+                    None if ctrl_right => 0,
+                    None               => files.len() - 1,
+                    Some(i) if ctrl_right => (i + 1).min(files.len() - 1),
+                    Some(i)               => i.saturating_sub(1),
+                };
+                let path = files[next_idx].clone();
+                self.request_action(PendingAction::LoadFile(path));
             }
         }
 
@@ -182,6 +212,7 @@ impl eframe::App for App {
                 match self.pending_action.take() {
                     Some(PendingAction::LoadFile(path)) => self.load_file(path),
                     Some(PendingAction::CloseFile)      => self.close_file(),
+                    Some(PendingAction::Quit)           => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
                     None => {}
                 }
             }
@@ -246,26 +277,34 @@ impl eframe::App for App {
             .min_width(200.0)
             .default_width(250.0)
             .show(ctx, |ui| {
-                ui.label("📂 Files");
-                ui.separator();
                 ScrollArea::vertical()
                     .auto_shrink([false; 2])
                     .show(ui, |ui| {
+                        ui.label("📂 Files");
+                        ui.separator();
                         if let Some(selected_path) = render_sidebar(ui, &mut self.tree) {
                             self.request_action(PendingAction::LoadFile(selected_path));
+                        }
+
+                        // Outline panel — only shown when a doc is parsed
+                        if let Some(ref doc) = self.parsed_doc {
+                            if let Some(block_idx) = render_outline(ui, doc, &mut self.outline_open) {
+                                self.scroll_to_block = Some(block_idx);
+                            }
                         }
                     });
             });
 
         // ── Central panel ─────────────────────────────────────────────────
+        let scroll_to = self.scroll_to_block.take();
         CentralPanel::default().show(ctx, |ui| {
             match self.view_mode {
-                ViewMode::Preview => render_preview(ui, &self.parsed_doc, &self.buffer),
-                ViewMode::Edit    => render_editor(ui, &mut self.buffer, &mut self.modified, &mut self.needs_reparse),
+                ViewMode::Preview => render_preview(ui, &self.parsed_doc, &self.buffer, scroll_to, "preview"),
+                ViewMode::Edit    => render_editor(ui, &mut self.buffer, &mut self.modified, &mut self.needs_reparse, "editor"),
                 ViewMode::Split   => {
                     ui.columns(2, |cols| {
-                        render_editor(&mut cols[0], &mut self.buffer, &mut self.modified, &mut self.needs_reparse);
-                        render_preview(&mut cols[1], &self.parsed_doc, &self.buffer);
+                        render_editor(&mut cols[0], &mut self.buffer, &mut self.modified, &mut self.needs_reparse, "split_editor");
+                        render_preview(&mut cols[1], &self.parsed_doc, &self.buffer, scroll_to, "split_preview");
                     });
                 }
             }
@@ -273,12 +312,13 @@ impl eframe::App for App {
     }
 }
 
-fn render_preview(ui: &mut egui::Ui, doc: &Option<ParsedDoc>, buffer: &str) {
+fn render_preview(ui: &mut egui::Ui, doc: &Option<ParsedDoc>, buffer: &str, scroll_to: Option<usize>, id: &str) {
     ScrollArea::vertical()
+        .id_salt(id)
         .auto_shrink([false; 2])
         .show(ui, |ui| {
             if let Some(doc) = doc {
-                crate::markdown::render_markdown(ui, doc);
+                crate::markdown::render_markdown(ui, doc, scroll_to);
             } else if !buffer.is_empty() {
                 ui.label("Failed to parse markdown.");
             } else {
@@ -295,8 +335,10 @@ fn render_editor(
     buffer: &mut String,
     modified: &mut bool,
     needs_reparse: &mut bool,
+    id: &str,
 ) {
     ScrollArea::vertical()
+        .id_salt(id)
         .auto_shrink([false; 2])
         .show(ui, |ui| {
             let response = ui.add(

@@ -28,6 +28,13 @@ loads its raw content into a central panel as plain text.
 - On file click: read the file contents into a `String` buffer (`std::fs::read_to_string`)
 - Display the raw buffer in a scrollable `egui::ScrollArea` + `egui::Label` in the
   central panel (no rendering yet)
+- CLI path argument:
+  - Read `std::env::args().nth(1)` in `main()`
+  - If the path points to a **directory**: load it as the root tree (same as Open Folder)
+  - If the path points to a **file**: load the parent directory as the root tree and
+    open the file directly in the viewer
+  - If the path does not exist: print an error to stderr and start normally
+  - Pass the resolved initial state to `App::new()` instead of using `App::default()`
 
 ### Crates introduced
 - `eframe`, `egui`
@@ -39,6 +46,8 @@ loads its raw content into a central panel as plain text.
 - Can open a folder via the "Open Folder" button and see its tree in the sidebar
 - Can open a folder via `Ctrl+O` keyboard shortcut
 - Clicking a `.md` file shows its raw text on the right
+- `md_reader ./docs` opens the `docs` folder in the sidebar on launch
+- `md_reader ./docs/README.md` opens `docs` in the sidebar and loads `README.md`
 
 ---
 
@@ -178,6 +187,33 @@ polished toolbar, keyboard shortcuts, and an in-document navigation panel.
   - Highlight the heading entry whose block is currently visible in the viewport
     (track topmost visible block index via `ui.clip_rect()` intersection)
 
+- **Tab bar — open files kept in a top strip:**
+  - Replace the single `current_file: Option<PathBuf>` with a `Vec<OpenTab>` structure:
+    ```rust
+    struct OpenTab {
+        path: PathBuf,
+        buffer: String,
+        modified: bool,
+        parsed_doc: Option<ParsedDoc>,
+        needs_reparse: bool,
+    }
+    ```
+    and an `active_tab: Option<usize>` index
+  - **Opening a file:** double-click on a file in the sidebar opens (or focuses) its tab;
+    single-click can still preview without creating a persistent tab
+  - Render the tab strip as a `TopBottomPanel` between the main toolbar and the central
+    panel; each tab shows:
+    - The file's base name
+    - A `●` indicator when `modified == true`
+    - A small `×` close button on the right of the tab label
+  - Clicking a tab makes it the active tab
+  - Clicking `×` triggers the unsaved-changes guard before closing that tab
+  - `Ctrl+PageUp` / `Ctrl+PageDown` now cycles through open tabs (left / right)
+  - `Ctrl+W` closes the active tab
+  - `Ctrl+S` saves the active tab's buffer
+  - All per-file state (`buffer`, `modified`, `parsed_doc`, `needs_reparse`) moves
+    into `OpenTab`; `App` reads/writes only the active tab
+
 ### Crates introduced
 - None
 
@@ -188,6 +224,10 @@ polished toolbar, keyboard shortcuts, and an in-document navigation panel.
 - Navigation panel lists all H1/H2/H3 headings of the open document
 - Clicking a heading scrolls the preview to that section
 - H2 and H3 entries are visually indented relative to H1
+- Double-clicking a file in the sidebar opens it in a new tab (or focuses its existing tab)
+- Open tabs are visible in a strip below the toolbar with filename and modified indicator
+- Clicking `×` on a tab closes it (with unsaved-changes guard)
+- `Ctrl+PageUp` / `Ctrl+PageDown` cycles between open tabs
 
 ---
 
@@ -302,6 +342,200 @@ highlighting.
 - Word/line count shown in status bar
 - `Ctrl+F` opens a search bar; matches are highlighted and navigable with Enter/▲▼
 - Search bar dismisses with `Escape`
+
+---
+
+## Phase 7 — UI Theming & Visual Polish
+
+**Goal:** Replace egui's default grey aesthetic with a carefully chosen color system.
+Offer a set of named themes (light and dark) selectable at runtime, stored in persisted
+state. Each theme defines consistent colors for every surface: sidebar, toolbar, editor,
+preview, and code blocks.
+
+### Research basis
+
+All hex values below were sourced from production reading apps and validated against
+WCAG contrast requirements. The guiding principle: avoid pure `#000000`/`#ffffff` pairs
+— they maximise contrast mathematically (21:1) but cause visual vibration on screens.
+A range of 10:1–14:1 is optimal for long-form reading.
+
+### Theme definitions
+
+Each theme is a `Theme` struct with named color fields:
+
+```rust
+pub struct Theme {
+    pub name: &'static str,
+
+    // Surfaces
+    pub bg:              Color32,   // central panel / preview background
+    pub sidebar_bg:      Color32,   // sidebar + outline panel background
+    pub toolbar_bg:      Color32,   // top toolbar background
+    pub tab_bar_bg:      Color32,   // tab strip background
+
+    // Text
+    pub fg:              Color32,   // body text
+    pub fg_muted:        Color32,   // muted / secondary text (H3, labels)
+    pub sidebar_fg:      Color32,   // sidebar file/folder labels
+    pub sidebar_active:  Color32,   // currently open file highlight
+
+    // Interactive
+    pub link:            Color32,   // hyperlinks
+    pub selection_bg:    Color32,   // text selection background
+
+    // Code blocks
+    pub code_bg:         Color32,   // fenced code block frame background
+    pub inline_code_fg:  Color32,   // `inline code` text color
+
+    // Structural
+    pub separator:       Color32,   // dividers, rule (---) lines
+    pub quote_bg:        Color32,   // blockquote left-bar tint
+}
+```
+
+### Built-in themes (5 total, mirroring mdBook)
+
+#### Light — clean white, high contrast
+Inspired by GitHub Markdown light + mdBook Light.
+| Field | Hex | Notes |
+|---|---|---|
+| `bg` | `#ffffff` | pure white content area |
+| `sidebar_bg` | `#fafafa` | barely-off-white sidebar |
+| `toolbar_bg` | `#f0f0f0` | light grey toolbar |
+| `tab_bar_bg` | `#e8e8e8` | slightly darker tab strip |
+| `fg` | `#1f2328` | GitHub's near-black body text (contrast 16:1) |
+| `fg_muted` | `#57606a` | muted labels |
+| `sidebar_fg` | `#24292f` | sidebar filenames |
+| `sidebar_active`| `#0969da` | GitHub blue active link |
+| `link` | `#0969da` | |
+| `selection_bg` | `#b3d4fc` | |
+| `code_bg` | `#f6f8fa` | GitHub code background |
+| `inline_code_fg`| `#d63384` | |
+| `separator` | `#d0d7de` | |
+| `quote_bg` | `#f0f8fc` | very light blue tint |
+
+#### Rust — warm parchment, dark sidebar
+Direct port of mdBook's "Rust" theme.
+| Field | Hex |
+|---|---|
+| `bg` | `#ddddd2` |
+| `sidebar_bg` | `#3b2e2a` |
+| `toolbar_bg` | `#332926` |
+| `tab_bar_bg` | `#2e2420` |
+| `fg` | `#262625` |
+| `fg_muted` | `#6e6b5e` |
+| `sidebar_fg` | `#c8c9db` |
+| `sidebar_active`| `#e69f67` |
+| `link` | `#2b79a2` |
+| `selection_bg` | `#c9a87c` |
+| `code_bg` | `#c9c9bc` |
+| `inline_code_fg`| `#6e6b5e` |
+| `separator` | `#b0afa4` |
+| `quote_bg` | `#d4d4c8` |
+
+#### Coal — near-black dark mode
+Port of mdBook "Coal".
+| Field | Hex |
+|---|---|
+| `bg` | `#131516` |
+| `sidebar_bg` | `#292c2f` |
+| `toolbar_bg` | `#22252a` |
+| `tab_bar_bg` | `#1e2124` |
+| `fg` | `#98a3ad` |
+| `fg_muted` | `#6b7680` |
+| `sidebar_fg` | `#a1adb8` |
+| `sidebar_active`| `#3473ad` |
+| `link` | `#2b79a2` |
+| `selection_bg` | `#2d4f6e` |
+| `code_bg` | `#1e2124` |
+| `inline_code_fg`| `#c5c8c6` |
+| `separator` | `#3a3f44` |
+| `quote_bg` | `#1c2024` |
+
+#### Navy — blue-tinted dark mode
+Port of mdBook "Navy".
+| Field | Hex |
+|---|---|
+| `bg` | `#161b2c` |
+| `sidebar_bg` | `#282d3f` |
+| `toolbar_bg` | `#1e2235` |
+| `tab_bar_bg` | `#1a1e2e` |
+| `fg` | `#bcbdd0` |
+| `fg_muted` | `#7c7e94` |
+| `sidebar_fg` | `#c8c9db` |
+| `sidebar_active`| `#2b79a2` |
+| `link` | `#2b79a2` |
+| `selection_bg` | `#2b4a6e` |
+| `code_bg` | `#1e2235` |
+| `inline_code_fg`| `#c5c8c6` |
+| `separator` | `#353a52` |
+| `quote_bg` | `#1e2338` |
+
+#### Ayu — minimal near-black with warm accent
+Port of mdBook "Ayu".
+| Field | Hex |
+|---|---|
+| `bg` | `#0f1419` |
+| `sidebar_bg` | `#14191f` |
+| `toolbar_bg` | `#111519` |
+| `tab_bar_bg` | `#0d1015` |
+| `fg` | `#c5c5c5` |
+| `fg_muted` | `#5c6773` |
+| `sidebar_fg` | `#c8c9db` |
+| `sidebar_active`| `#ffb454` |
+| `link` | `#0096cf` |
+| `selection_bg` | `#273747` |
+| `code_bg` | `#191f26` |
+| `inline_code_fg`| `#ffb454` |
+| `separator` | `#1f2732` |
+| `quote_bg` | `#141a22` |
+
+### Typography
+
+- **Preview body font:** system sans-serif via `egui::FontFamily::Proportional`
+  - Body size: **16 px** (egui points ≈ CSS px at 96 dpi)
+  - H1: 28 px bold · H2: 22 px bold · H3: 18 px semi-bold
+  - Paragraph line-height: set via `egui::Style::spacing.item_spacing.y`
+  - Target reading width: **700 px** — add `ui.set_max_width(700.0)` centered in the
+    central panel
+- **Editor font:** `egui::FontFamily::Monospace`, 14 px
+- **Sidebar font:** 13 px; active file: same weight as body
+
+### Implementation
+
+- Add `src/theme/mod.rs` exporting `Theme`, `ThemeId` (enum), and `THEMES: &[Theme]`
+- Store `active_theme: ThemeId` in persisted state (Phase 6)
+- In `App::update()`, call `apply_theme(ctx, &theme)` once per frame:
+  ```rust
+  fn apply_theme(ctx: &egui::Context, theme: &Theme) {
+      let mut visuals = egui::Visuals::dark(); // or light() for light themes
+      visuals.panel_fill           = theme.bg;
+      visuals.window_fill          = theme.bg;
+      visuals.override_text_color  = Some(theme.fg);
+      visuals.hyperlink_color      = theme.link;
+      visuals.selection.bg_fill    = theme.selection_bg;
+      visuals.widgets.noninteractive.bg_fill = theme.sidebar_bg;
+      ctx.set_visuals(visuals);
+  }
+  ```
+- Sidebar, toolbar, and tab bar panels use `egui::Frame::none().fill(theme.toolbar_bg)`
+  (etc.) via `.frame(...)` on the panel builder
+- Renderer reads `theme.code_bg`, `theme.inline_code_fg`, `theme.fg_muted`,
+  `theme.quote_bg` directly for code block frames and blockquote styling
+- Theme picker: a small dropdown button in the toolbar (paint-brush icon) showing the
+  five theme names; selecting one updates `App::active_theme` immediately
+
+### Crates introduced
+- None (all egui built-ins + `Color32` constants)
+
+### Acceptance criteria
+- All 5 themes apply correctly with no hard-coded colors remaining in renderer or UI code
+- Sidebar, toolbar, tab strip, and central panel each use the theme's appropriate surface color
+- Body text contrast ≥ 7:1 on all themes (AAA) — verified manually
+- Preview body text renders at 16 px with H1/H2/H3 at 28/22/18 px
+- Preview content width is capped at ~700 px and centered
+- Theme selection persists across restarts
+- Switching themes updates the UI immediately without restart
 
 ---
 

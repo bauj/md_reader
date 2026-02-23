@@ -24,6 +24,7 @@ loads its raw content into a central panel as plain text.
   - Highlight the currently selected file
 - Add an "Open Folder" button in the toolbar that opens a native folder picker
   (`rfd` crate — Rusty File Dialogs)
+  - Support `Ctrl+O` keyboard shortcut to open folder
 - On file click: read the file contents into a `String` buffer (`std::fs::read_to_string`)
 - Display the raw buffer in a scrollable `egui::ScrollArea` + `egui::Label` in the
   central panel (no rendering yet)
@@ -35,7 +36,8 @@ loads its raw content into a central panel as plain text.
 
 ### Acceptance criteria
 - App window opens without crashing
-- Can open a folder and see its tree in the sidebar
+- Can open a folder via the "Open Folder" button and see its tree in the sidebar
+- Can open a folder via `Ctrl+O` keyboard shortcut
 - Clicking a `.md` file shows its raw text on the right
 
 ---
@@ -43,14 +45,15 @@ loads its raw content into a central panel as plain text.
 ## Phase 2 — Markdown Preview Renderer
 
 **Goal:** The central panel renders markdown as formatted text — headings, paragraphs,
-bold, italic, inline code, blockquotes, and unordered/ordered lists.
+bold, italic, inline code, blockquotes, unordered/ordered lists, and tables.
 
 ### Tasks
 - Add `pulldown-cmark` and parse the buffer into an event stream
 - Define a `ParsedDoc` intermediate representation:
   - A `Vec<Block>` where `Block` is an enum: `Heading(level, inlines)`,
     `Paragraph(inlines)`, `CodeBlock(lang, code)`, `BlockQuote(blocks)`,
-    `List(ordered, items)`, `Rule`, etc.
+    `List(ordered, items)`, `Table(headers, rows)`, `Rule`, etc.
+  - `Table` structure: headers are `Vec<String>`, rows are `Vec<Vec<String>>`
   - `Inline` enum: `Text(String)`, `Bold(inlines)`, `Italic(inlines)`,
     `Code(String)`, `Link(url, inlines)`, `Image(url, alt)`
 - Implement `renderer.rs`: walk the `ParsedDoc` and emit egui draw calls
@@ -60,6 +63,11 @@ bold, italic, inline code, blockquotes, and unordered/ordered lists.
   - Blockquotes: left border via a custom painter rect + indented text
   - Horizontal rules: `ui.separator()`
   - Lists: bullet points or numbered labels with indented content
+  - Tables: render as grid using `ui.grid()` or `egui_extras::TableBuilder`
+    - Header row with bold background color
+    - Data rows with alternating row colors for readability
+    - Cell padding and borders for clear separation
+    - Right-align numeric columns (heuristic detection)
 - Cache the `ParsedDoc` — only re-parse when the buffer changes (dirty flag)
 - Default view mode is **Preview**
 
@@ -71,6 +79,8 @@ bold, italic, inline code, blockquotes, and unordered/ordered lists.
 - Headings are visually distinct by level
 - Bold, italic, and inline code are styled correctly
 - Lists render with bullets/numbers
+- Tables render with clear headers and readable rows
+- Table cells display content correctly with proper alignment
 
 ---
 
@@ -108,7 +118,7 @@ with the ability to save changes to disk.
 ## Phase 4 — Split View, Toolbar Polish & Keyboard Navigation
 
 **Goal:** A side-by-side split view showing editor and preview simultaneously, plus a
-polished toolbar and keyboard shortcuts for common actions.
+polished toolbar, keyboard shortcuts, and an in-document navigation panel.
 
 ### Tasks
 - Split view layout:
@@ -129,6 +139,19 @@ polished toolbar and keyboard shortcuts for common actions.
   - Prompt for filename inline in the sidebar (editable text field appears)
   - Create the file on disk and open it in the editor
 - Window title: `md_reader — <filename> [●]`
+- Document navigation panel (outline):
+  - Shown as a collapsible bottom section of the left sidebar, below the file tree
+  - Extract all H1/H2/H3 headings from `ParsedDoc` into a `Vec<(u32, String, usize)>`
+    where the tuple is `(level, title, block_index)`
+  - Render each heading as a clickable label, indented by level:
+    - H1: no indent, full weight
+    - H2: 12px indent, normal weight
+    - H3: 24px indent, slightly dimmed color
+  - Clicking a heading sets a `scroll_to_block: Option<usize>` on the app state
+  - The preview `ScrollArea` checks `scroll_to_block` each frame and calls
+    `ui.scroll_to_cursor()` to jump to the matching block, then clears the flag
+  - Highlight the heading entry whose block is currently visible in the viewport
+    (track topmost visible block index via `ui.clip_rect()` intersection)
 
 ### Crates introduced
 - None
@@ -137,6 +160,9 @@ polished toolbar and keyboard shortcuts for common actions.
 - Split view works with editor and live preview side-by-side
 - All listed keyboard shortcuts function correctly
 - New file can be created from within the app
+- Navigation panel lists all H1/H2/H3 headings of the open document
+- Clicking a heading scrolls the preview to that section
+- H2 and H3 entries are visually indented relative to H1
 
 ---
 

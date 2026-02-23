@@ -49,6 +49,7 @@ pub fn parse_markdown(text: &str) -> ParsedDoc {
     // List state
     let mut list_ordered = false;
     let mut list_items: Vec<Vec<Inline>> = Vec::new();
+    let mut in_list_item = false;
 
     // Code block state
     let mut code_lang = String::new();
@@ -79,8 +80,11 @@ pub fn parse_markdown(text: &str) -> ParsedDoc {
                 ctx = Ctx::Heading(level as u32);
             }
             Event::Start(Tag::Paragraph) => {
-                current_inlines.clear();
-                ctx = Ctx::Paragraph;
+                if !in_list_item {
+                    current_inlines.clear();
+                    ctx = Ctx::Paragraph;
+                }
+                // inside a list item: let inlines keep accumulating into current_inlines
             }
             Event::Start(Tag::BlockQuote(_)) => {
                 current_inlines.clear();
@@ -93,6 +97,7 @@ pub fn parse_markdown(text: &str) -> ParsedDoc {
             Event::Start(Tag::Item) => {
                 current_inlines.clear();
                 ctx = Ctx::ListItem;
+                in_list_item = true;
             }
             Event::Start(Tag::CodeBlock(kind)) => {
                 code_lang = match kind {
@@ -122,11 +127,12 @@ pub fn parse_markdown(text: &str) -> ParsedDoc {
                 ctx = Ctx::None;
             }
             Event::End(TagEnd::Paragraph) => {
-                if ctx == Ctx::Paragraph || ctx == Ctx::ListItem || ctx == Ctx::BlockQuote {
-                    if ctx == Ctx::Paragraph {
-                        blocks.push(Block::Paragraph(std::mem::take(&mut current_inlines)));
-                    }
-                    // for ListItem/BlockQuote the inline content is kept until the item/quote ends
+                if in_list_item {
+                    // inlines stay in current_inlines; End(Item) will collect them
+                } else if ctx == Ctx::Paragraph {
+                    blocks.push(Block::Paragraph(std::mem::take(&mut current_inlines)));
+                    ctx = Ctx::None;
+                } else if ctx == Ctx::BlockQuote {
                     ctx = Ctx::None;
                 }
             }
@@ -137,6 +143,7 @@ pub fn parse_markdown(text: &str) -> ParsedDoc {
             Event::End(TagEnd::Item) => {
                 list_items.push(std::mem::take(&mut current_inlines));
                 ctx = Ctx::None;
+                in_list_item = false;
             }
             Event::End(TagEnd::List(_)) => {
                 blocks.push(Block::List(list_ordered, std::mem::take(&mut list_items)));
@@ -197,7 +204,13 @@ pub fn parse_markdown(text: &str) -> ParsedDoc {
                 }
             }
             Event::Code(c) => {
-                current_inlines.push(Inline::Code(c.to_string()));
+                if ctx == Ctx::TableCell {
+                    table_cur_cell.push('`');
+                    table_cur_cell.push_str(&c);
+                    table_cur_cell.push('`');
+                } else {
+                    current_inlines.push(Inline::Code(c.to_string()));
+                }
             }
             Event::SoftBreak => {
                 if ctx == Ctx::CodeBlock {

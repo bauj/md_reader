@@ -104,6 +104,16 @@ with the ability to save changes to disk.
   - Set `modified = false` after successful save
 - Handle unsaved-changes guard: when switching files while `modified == true`,
   show an `egui::Modal` / inline dialog: "Unsaved changes — Save / Discard / Cancel"
+- Close current file:
+  - `Ctrl+W` keyboard shortcut closes the current file
+  - If `modified == true`, show the unsaved-changes dialog before closing
+  - On close: clear `buffer`, `current_file`, `parsed_doc`, reset `modified`
+- New file on Edit with no file open:
+  - When the user clicks "Edit" (or switches to Split) with no file open, open a
+    native save dialog (`rfd::FileDialog::new().save_file()`) to pick a name and location
+  - Create the file on disk immediately (empty content) via `std::fs::write`
+  - Load it as the current file and switch to Edit mode
+  - If the user cancels the dialog, stay in Preview mode
 
 ### Crates introduced
 - None (all egui built-ins)
@@ -112,6 +122,8 @@ with the ability to save changes to disk.
 - Can edit a file and save it with Ctrl+S
 - Unsaved changes indicator is visible
 - Switching files with unsaved changes prompts the user
+- `Ctrl+W` closes the current file (with unsaved-changes guard)
+- Clicking Edit with no file open prompts to create a new file
 
 ---
 
@@ -133,7 +145,7 @@ polished toolbar, keyboard shortcuts, and an in-document navigation panel.
   - `Ctrl+S` — save
   - `Ctrl+O` — open folder
   - `Ctrl+N` — new file (prompts for name in sidebar or dialog)
-  - `Ctrl+W` — close current file
+  - `Ctrl+W` — close current file *(implemented in Phase 3)*
   - `Ctrl+[` / `Ctrl+]` — cycle sidebar selection up/down (keyboard navigation)
 - New file creation:
   - Prompt for filename inline in the sidebar (editable text field appears)
@@ -236,7 +248,26 @@ highlighting.
 - Clickable links in preview: `egui::Response::clicked()` → `open::that(url)`
 - Images in markdown: render inline with `egui_extras::RetainedImage` (load from
   relative path or URL)
-- Search bar (Ctrl+F): highlight matching text in both editor and preview
+#### Search (Ctrl+F)
+- Toggle a search bar with `Ctrl+F`; pressing `Escape` or `Ctrl+F` again dismisses it
+- Search bar appears as a floating overlay in the top-right corner of the central panel
+- Search state on `App`:
+  ```
+  search_query: String,
+  search_open: bool,
+  search_matches: Vec<usize>,   // byte offsets into buffer
+  search_current: usize,        // index into search_matches
+  ```
+- Matching: case-insensitive substring search over `self.buffer` on every keystroke
+  - Collect all byte offsets of matches into `search_matches`
+  - Show match count: "3 / 12" (current / total)
+- Navigation: `Enter` / `Shift+Enter` or ▲▼ buttons cycle through matches
+  - Scroll the preview or editor to bring the current match into view
+- Highlighting in **Preview mode**: re-render paragraphs that contain a match,
+  wrapping the matched substring in a highlighted `RichText` span (yellow background)
+- Highlighting in **Edit mode**: use `TextEdit`'s layouter callback to apply a
+  background color to matched ranges via `egui::text::LayoutJob`
+- "No results" shown in muted text when `search_matches` is empty
 - Status bar at the bottom: line count, word count, cursor position (edit mode)
 - Drag-and-drop: accept a dropped `.md` file or folder via `ctx.input(|i| &i.raw.dropped_files)`
 
@@ -256,6 +287,8 @@ highlighting.
 - Can clear recent files history
 - Clicking a link opens it in the default browser
 - Word/line count shown in status bar
+- `Ctrl+F` opens a search bar; matches are highlighted and navigable with Enter/▲▼
+- Search bar dismisses with `Escape`
 
 ---
 

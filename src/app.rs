@@ -1,15 +1,36 @@
-use egui::{CentralPanel, SidePanel, TopBottomPanel, ScrollArea};
+use egui::{CentralPanel, Key, ScrollArea, SidePanel, TextEdit, TopBottomPanel};
 use std::path::PathBuf;
 use crate::fs::FsTree;
 use crate::markdown::{parse_markdown, ParsedDoc};
 use crate::ui::render_sidebar;
 
+#[derive(PartialEq, Clone, Copy)]
+pub enum ViewMode {
+    Preview,
+    Edit,
+    Split,
+}
+
+/// What to do after the unsaved-changes dialog is resolved.
+enum PendingAction {
+    LoadFile(PathBuf),
+    CloseFile,
+}
+
 pub struct App {
     tree: FsTree,
+
     current_file: Option<PathBuf>,
     buffer: String,
+    modified: bool,
+
     parsed_doc: Option<ParsedDoc>,
-    buffer_dirty: bool,
+    needs_reparse: bool,
+
+    view_mode: ViewMode,
+
+    /// Set when the user triggers an action that requires discarding/saving first.
+    pending_action: Option<PendingAction>,
 }
 
 impl Default for App {
@@ -18,92 +39,275 @@ impl Default for App {
             tree: FsTree::default(),
             current_file: None,
             buffer: String::new(),
+            modified: false,
             parsed_doc: None,
-            buffer_dirty: false,
+            needs_reparse: false,
+            view_mode: ViewMode::Preview,
+            pending_action: None,
         }
+    }
+}
+
+impl App {
+    fn load_file(&mut self, path: PathBuf) {
+        match std::fs::read_to_string(&path) {
+            Ok(content) => {
+                self.buffer = content;
+                self.current_file = Some(path);
+                self.modified = false;
+                self.needs_reparse = true;
+            }
+            Err(e) => eprintln!("Failed to read file: {e}"),
+        }
+    }
+
+    fn close_file(&mut self) {
+        self.current_file = None;
+        self.buffer.clear();
+        self.parsed_doc = None;
+        self.modified = false;
+        self.view_mode = ViewMode::Preview;
+    }
+
+    fn save_file(&mut self) {
+        if let Some(ref path) = self.current_file.clone() {
+            match std::fs::write(path, &self.buffer) {
+                Ok(_) => {
+                    self.modified = false;
+                    self.needs_reparse = true;
+                }
+                Err(e) => eprintln!("Failed to save file: {e}"),
+            }
+        }
+    }
+
+    /// Call this whenever the user wants to do something that requires a clean state.
+    /// If there are unsaved changes, stores the action for after the dialog.
+    /// Returns `true` if the action can proceed immediately (no unsaved changes).
+    fn request_action(&mut self, action: PendingAction) -> bool {
+        if self.modified {
+            self.pending_action = Some(action);
+            false
+        } else {
+            match action {
+                PendingAction::LoadFile(path) => self.load_file(path),
+                PendingAction::CloseFile      => self.close_file(),
+            }
+            true
+        }
+    }
+
+    fn window_title(&self) -> String {
+        match &self.current_file {
+            Some(path) => {
+                let name = path.file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                if self.modified {
+                    format!("md_reader — {name} ●")
+                } else {
+                    format!("md_reader — {name}")
+                }
+            }
+            None => "md_reader".to_string(),
+        }
+    }
+
+    /// Open a save-file dialog, create the file on disk, and load it.
+    /// Returns true if a file was created.
+    fn create_new_file(&mut self) -> bool {
+        if let Some(path) = rfd::FileDialog::new()
+            .add_filter("Markdown", &["md"])
+            .set_file_name("untitled.md")
+            .save_file()
+        {
+            match std::fs::write(&path, "") {
+                Ok(_) => {
+                    self.load_file(path);
+                    return true;
+                }
+                Err(e) => eprintln!("Failed to create file: {e}"),
+            }
+        }
+        false
     }
 }
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // Handle Ctrl+O for opening folder
-        ctx.input(|i| {
-            if i.key_pressed(egui::Key::O) && i.modifiers.ctrl {
-                if let Some(path) = rfd::FileDialog::new().pick_folder() {
-                    self.tree = FsTree::new(path);
-                    self.current_file = None;
-                    self.buffer.clear();
-                    self.parsed_doc = None;
+        ctx.send_viewport_cmd(egui::ViewportCommand::Title(self.window_title()));
+
+        // ── Keyboard shortcuts ────────────────────────────────────────────
+        let ctrl_s = ctx.input(|i| i.key_pressed(Key::S) && i.modifiers.ctrl);
+        let ctrl_o = ctx.input(|i| i.key_pressed(Key::O) && i.modifiers.ctrl);
+        let ctrl_w = ctx.input(|i| i.key_pressed(Key::W) && i.modifiers.ctrl);
+
+        if ctrl_s { self.save_file(); }
+
+        if ctrl_w { self.request_action(PendingAction::CloseFile); }
+
+        if ctrl_o {
+            if let Some(path) = rfd::FileDialog::new().pick_folder() {
+                self.tree = FsTree::new(path);
+                // Don't close the current file — just refresh the tree
+            }
+        }
+
+        // ── Re-parse when needed ──────────────────────────────────────────
+        if self.needs_reparse {
+            self.parsed_doc = Some(parse_markdown(&self.buffer));
+            self.needs_reparse = false;
+        }
+
+        // ── Unsaved-changes dialog ────────────────────────────────────────
+        if self.pending_action.is_some() {
+            let mut choice: Option<bool> = None; // Some(true) = save, Some(false) = discard, None = cancel
+
+            egui::Window::new("Unsaved changes")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .show(ctx, |ui| {
+                    ui.label("You have unsaved changes. What would you like to do?");
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        if ui.button("💾 Save").clicked()    { choice = Some(true); }
+                        if ui.button("🗑 Discard").clicked() { choice = Some(false); }
+                        if ui.button("Cancel").clicked()     { choice = None; self.pending_action = None; }
+                    });
+                });
+
+            if let Some(save) = choice {
+                if save { self.save_file(); }
+                match self.pending_action.take() {
+                    Some(PendingAction::LoadFile(path)) => self.load_file(path),
+                    Some(PendingAction::CloseFile)      => self.close_file(),
+                    None => {}
                 }
             }
-        });
+        }
 
-        // Top toolbar
+        // ── Toolbar ───────────────────────────────────────────────────────
+        let mode_before = self.view_mode;
+
         TopBottomPanel::top("toolbar").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 if ui.button("📁 Open Folder").clicked() {
                     if let Some(path) = rfd::FileDialog::new().pick_folder() {
                         self.tree = FsTree::new(path);
-                        self.current_file = None;
-                        self.buffer.clear();
-                        self.parsed_doc = None;
                     }
                 }
 
                 ui.separator();
 
+                ui.selectable_value(&mut self.view_mode, ViewMode::Preview, "👁 Preview");
+                ui.selectable_value(&mut self.view_mode, ViewMode::Edit,    "✏ Edit");
+                ui.selectable_value(&mut self.view_mode, ViewMode::Split,   "⬜ Split");
+
+                ui.separator();
+
                 if let Some(ref path) = self.current_file {
                     if let Some(name) = path.file_name() {
-                        ui.label(format!("📄 {}", name.to_string_lossy()));
+                        let label = if self.modified {
+                            format!("📄 {} ●", name.to_string_lossy())
+                        } else {
+                            format!("📄 {}", name.to_string_lossy())
+                        };
+                        ui.label(label);
                     }
                 } else {
                     ui.label("No file open");
                 }
+
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.add_enabled(self.modified, egui::Button::new("💾 Save")).clicked() {
+                        self.save_file();
+                    }
+                    if ui.add_enabled(self.current_file.is_some(), egui::Button::new("✖ Close")).clicked() {
+                        self.request_action(PendingAction::CloseFile);
+                    }
+                });
             });
         });
 
-        // Left sidebar
+        // If the user switched to Edit or Split with no file open, create one.
+        let switched_to_edit = mode_before == ViewMode::Preview
+            && (self.view_mode == ViewMode::Edit || self.view_mode == ViewMode::Split);
+
+        if switched_to_edit && self.current_file.is_none() {
+            let created = self.create_new_file();
+            if !created {
+                self.view_mode = ViewMode::Preview; // user cancelled dialog
+            }
+        }
+
+        // ── Sidebar ───────────────────────────────────────────────────────
         SidePanel::left("sidebar")
             .min_width(200.0)
             .default_width(250.0)
             .show(ctx, |ui| {
                 ui.label("📂 Files");
                 ui.separator();
-
                 ScrollArea::vertical()
                     .auto_shrink([false; 2])
                     .show(ui, |ui| {
                         if let Some(selected_path) = render_sidebar(ui, &mut self.tree) {
-                            match std::fs::read_to_string(&selected_path) {
-                                Ok(content) => {
-                                    self.buffer = content;
-                                    self.current_file = Some(selected_path);
-                                    self.buffer_dirty = true;
-                                }
-                                Err(e) => eprintln!("Failed to read file: {e}"),
-                            }
-                        }
-                        // Re-parse only when buffer changed
-                        if self.buffer_dirty {
-                            self.parsed_doc = Some(parse_markdown(&self.buffer));
-                            self.buffer_dirty = false;
+                            self.request_action(PendingAction::LoadFile(selected_path));
                         }
                     });
             });
 
-        // Central panel with markdown preview
+        // ── Central panel ─────────────────────────────────────────────────
         CentralPanel::default().show(ctx, |ui| {
-            ScrollArea::vertical()
-                .auto_shrink([false; 2])
-                .show(ui, |ui| {
-                    if let Some(ref doc) = self.parsed_doc {
-                        crate::markdown::render_markdown(ui, doc);
-                    } else if !self.buffer.is_empty() {
-                        ui.label("Failed to parse markdown");
-                    } else {
-                        ui.label("No file selected");
-                    }
-                });
+            match self.view_mode {
+                ViewMode::Preview => render_preview(ui, &self.parsed_doc, &self.buffer),
+                ViewMode::Edit    => render_editor(ui, &mut self.buffer, &mut self.modified, &mut self.needs_reparse),
+                ViewMode::Split   => {
+                    ui.columns(2, |cols| {
+                        render_editor(&mut cols[0], &mut self.buffer, &mut self.modified, &mut self.needs_reparse);
+                        render_preview(&mut cols[1], &self.parsed_doc, &self.buffer);
+                    });
+                }
+            }
         });
     }
+}
+
+fn render_preview(ui: &mut egui::Ui, doc: &Option<ParsedDoc>, buffer: &str) {
+    ScrollArea::vertical()
+        .auto_shrink([false; 2])
+        .show(ui, |ui| {
+            if let Some(doc) = doc {
+                crate::markdown::render_markdown(ui, doc);
+            } else if !buffer.is_empty() {
+                ui.label("Failed to parse markdown.");
+            } else {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(40.0);
+                    ui.label(egui::RichText::new("No file open").color(egui::Color32::GRAY));
+                });
+            }
+        });
+}
+
+fn render_editor(
+    ui: &mut egui::Ui,
+    buffer: &mut String,
+    modified: &mut bool,
+    needs_reparse: &mut bool,
+) {
+    ScrollArea::vertical()
+        .auto_shrink([false; 2])
+        .show(ui, |ui| {
+            let response = ui.add(
+                TextEdit::multiline(buffer)
+                    .font(egui::TextStyle::Monospace)
+                    .desired_width(f32::INFINITY)
+                    .desired_rows(40),
+            );
+            if response.changed() {
+                *modified = true;
+                *needs_reparse = true;
+            }
+        });
 }

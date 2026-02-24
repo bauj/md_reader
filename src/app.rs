@@ -68,7 +68,8 @@ pub struct OpenTab {
 }
 
 pub struct App {
-    tree: FsTree,
+    /// One entry per open folder: (tree, optional file-system watcher).
+    roots: Vec<(FsTree, Option<FileWatcher>)>,
 
     tabs:       Vec<OpenTab>,
     active_tab: Option<usize>,
@@ -78,8 +79,6 @@ pub struct App {
     view_mode: ViewMode,
 
     recent_files: Vec<PathBuf>,
-
-    watcher: Option<FileWatcher>,
 
     pending_action: Option<PendingAction>,
 
@@ -111,13 +110,12 @@ impl App {
         let state = persist::load();
 
         let mut app = App {
-            tree:              FsTree::default(),
+            roots:             Vec::new(),
             tabs:              Vec::new(),
             active_tab:        None,
             highlighter:       Highlighter::new(),
             view_mode:         ViewMode::from_str(&state.view_mode),
             recent_files:      state.recent_files.into_iter().filter(|p| p.is_file()).collect(),
-            watcher:              None,
             pending_action:       None,
             search_open:             false,
             search_query:            String::new(),
@@ -134,25 +132,22 @@ impl App {
         };
 
         if let Some(path) = initial_path {
-            // CLI argument takes precedence; ignore persisted tabs/root.
+            // CLI argument takes precedence; ignore persisted tabs/roots.
             if !path.exists() {
                 eprintln!("md_reader: path not found: {}", path.display());
             } else if path.is_dir() {
-                app.watcher = FileWatcher::new(&path);
-                app.tree = FsTree::new(path);
+                app.add_root(path);
             } else if path.is_file() {
                 if let Some(parent) = path.parent() {
-                    app.watcher = FileWatcher::new(parent);
-                    app.tree = FsTree::new(parent.to_path_buf());
+                    app.add_root(parent.to_path_buf());
                 }
                 app.open_tab(path);
             }
         } else {
             // Restore last session.
-            if let Some(dir) = state.root_dir {
+            for dir in state.root_dirs {
                 if dir.is_dir() {
-                    app.watcher = FileWatcher::new(&dir);
-                    app.tree = FsTree::new(dir);
+                    app.add_root(dir);
                 }
             }
             // Reopen tabs that still exist on disk (preserve order).
@@ -166,8 +161,9 @@ impl App {
                 let idx = state.active_tab
                     .unwrap_or(0)
                     .min(app.tabs.len() - 1);
-                app.active_tab    = Some(idx);
-                app.tree.selected = Some(app.tabs[idx].path.clone());
+                app.active_tab = Some(idx);
+                let p = app.tabs[idx].path.clone();
+                app.set_selected(Some(p));
             }
         }
 
@@ -257,7 +253,9 @@ impl App {
     /// Snapshot current session into a `persist::AppState` and write it to disk.
     fn save_state(&self) {
         let state = persist::AppState {
-            root_dir:     self.tree.root.as_ref().map(|n| n.path.clone()),
+            root_dirs:    self.roots.iter()
+                              .filter_map(|(t, _)| t.root.as_ref().map(|n| n.path.clone()))
+                              .collect(),
             open_tabs:    self.tabs.iter().map(|t| t.path.clone()).collect(),
             active_tab:   self.active_tab,
             view_mode:    self.view_mode.as_str().to_string(),
@@ -280,12 +278,12 @@ impl App {
         self.push_recent(&path);
         if let Some(idx) = self.tabs.iter().position(|t| t.path == path) {
             self.active_tab = Some(idx);
-            self.tree.selected = Some(path);
+            self.set_selected(Some(path));
             return;
         }
         match std::fs::read_to_string(&path) {
             Ok(content) => {
-                self.tree.selected = Some(path.clone());
+                self.set_selected(Some(path.clone()));
                 self.tabs.push(OpenTab {
                     path,
                     buffer:          content,
@@ -308,7 +306,25 @@ impl App {
         } else {
             Some(idx.saturating_sub(1))
         };
-        self.tree.selected = self.active_tab.map(|i| self.tabs[i].path.clone());
+        let sel = self.active_tab.map(|i| self.tabs[i].path.clone());
+        self.set_selected(sel);
+    }
+
+    /// Add a root folder and its file-system watcher.
+    fn add_root(&mut self, path: PathBuf) {
+        // Don't add the same root twice.
+        if self.roots.iter().any(|(t, _)| t.root.as_ref().map(|n| &n.path) == Some(&path)) {
+            return;
+        }
+        let watcher = FileWatcher::new(&path);
+        self.roots.push((FsTree::new(path), watcher));
+    }
+
+    /// Set `selected` on every root tree (the one containing the file will highlight it).
+    fn set_selected(&mut self, path: Option<PathBuf>) {
+        for (tree, _) in &mut self.roots {
+            tree.selected = path.clone();
+        }
     }
 
     fn save_active(&mut self) {
@@ -410,8 +426,7 @@ impl eframe::App for App {
         if ctrl_n { self.create_new_file(); }
         if ctrl_o {
             if let Some(path) = rfd::FileDialog::new().pick_folder() {
-                self.watcher = FileWatcher::new(&path);
-                self.tree    = FsTree::new(path);
+                self.add_root(path);
             }
         }
         if ctrl_f {
@@ -458,43 +473,44 @@ impl eframe::App for App {
                 } else {
                     cur.saturating_sub(1)
                 };
-                self.active_tab    = Some(next);
-                self.tree.selected = Some(self.tabs[next].path.clone());
+                self.active_tab = Some(next);
+                let p = self.tabs[next].path.clone();
+                self.set_selected(Some(p));
             }
         }
 
         // ── File-watcher events ───────────────────────────────────────────
         let mut rescan_tree = false;
-        if let Some(ref w) = self.watcher {
-            while let Ok(Ok(event)) = w.rx.try_recv() {
-                use notify::EventKind::*;
-                match event.kind {
-                    Modify(_) => {
-                        for path in &event.paths {
-                            if let Some(tab) = self.tabs.iter_mut().find(|t| &t.path == path) {
-                                if tab.modified {
-                                    // User has unsaved edits — flag for the banner.
-                                    tab.extern_modified = true;
-                                } else {
-                                    // No local edits — silently reload.
-                                    if let Ok(content) = std::fs::read_to_string(&tab.path) {
-                                        tab.buffer        = content;
-                                        tab.needs_reparse = true;
-                                        tab.extern_modified = false;
+        for (_, watcher) in &self.roots {
+            if let Some(w) = watcher {
+                while let Ok(Ok(event)) = w.rx.try_recv() {
+                    use notify::EventKind::*;
+                    match event.kind {
+                        Modify(_) => {
+                            for path in &event.paths {
+                                if let Some(tab) = self.tabs.iter_mut().find(|t| &t.path == path) {
+                                    if tab.modified {
+                                        tab.extern_modified = true;
+                                    } else {
+                                        if let Ok(content) = std::fs::read_to_string(&tab.path) {
+                                            tab.buffer          = content;
+                                            tab.needs_reparse   = true;
+                                            tab.extern_modified = false;
+                                        }
                                     }
                                 }
                             }
                         }
+                        Create(_) | Remove(_) | Other => { rescan_tree = true; }
+                        _ => {}
                     }
-                    Create(_) | Remove(_) | Other => {
-                        rescan_tree = true;
-                    }
-                    _ => {}
                 }
             }
         }
         if rescan_tree {
-            self.tree.rescan();
+            for (tree, _) in &mut self.roots {
+                tree.rescan();
+            }
         }
 
         // ── Re-parse active tab when needed ──────────────────────────────
@@ -566,6 +582,15 @@ impl eframe::App for App {
             }
         }
 
+        // ── View-mode restriction ─────────────────────────────────────────
+        // Edit and Split only make sense for .md files.
+        let active_is_md = self.active_tab
+            .and_then(|i| self.tabs.get(i))
+            .map_or(true, |t| is_markdown(&t.path));
+        if !active_is_md && self.view_mode != ViewMode::Preview {
+            self.view_mode = ViewMode::Preview;
+        }
+
         // ── Toolbar ───────────────────────────────────────────────────────
         let mode_before = self.view_mode;
 
@@ -573,8 +598,7 @@ impl eframe::App for App {
             ui.horizontal(|ui| {
                 if ui.button("📁 Open Folder").clicked() {
                     if let Some(path) = rfd::FileDialog::new().pick_folder() {
-                        self.watcher = FileWatcher::new(&path);
-                        self.tree    = FsTree::new(path);
+                        self.add_root(path);
                     }
                 }
 
@@ -622,8 +646,10 @@ impl eframe::App for App {
                 ui.separator();
 
                 ui.selectable_value(&mut self.view_mode, ViewMode::Preview, "👁 Preview");
-                ui.selectable_value(&mut self.view_mode, ViewMode::Edit,    "✏ Edit");
-                ui.selectable_value(&mut self.view_mode, ViewMode::Split,   "⬜ Split");
+                if active_is_md {
+                    ui.selectable_value(&mut self.view_mode, ViewMode::Edit,  "✏ Edit");
+                    ui.selectable_value(&mut self.view_mode, ViewMode::Split, "⬜ Split");
+                }
 
                 ui.separator();
 
@@ -684,8 +710,9 @@ impl eframe::App for App {
                     }
 
                     if let Some(i) = activate_idx {
-                        self.active_tab    = Some(i);
-                        self.tree.selected = Some(self.tabs[i].path.clone());
+                        self.active_tab = Some(i);
+                        let p = self.tabs[i].path.clone();
+                        self.set_selected(Some(p));
                     }
                     if let Some(i) = close_idx {
                         self.request_action(PendingAction::CloseTab(i));
@@ -752,20 +779,59 @@ impl eframe::App for App {
                 ScrollArea::vertical()
                     .auto_shrink([false; 2])
                     .show(ui, |ui| {
-                        ui.label("📂 Files");
-                        ui.separator();
-                        if let Some(path) = render_sidebar(ui, &mut self.tree) {
-                            self.open_tab(path);
+                        let mut open_path:  Option<PathBuf> = None;
+                        let mut close_root: Option<usize>   = None;
+
+                        if self.roots.is_empty() {
+                            ui.label(
+                                egui::RichText::new("No folder open")
+                                    .color(egui::Color32::GRAY),
+                            );
+                            ui.label(
+                                egui::RichText::new("Use 📁 Open Folder or Ctrl+O")
+                                    .color(egui::Color32::GRAY)
+                                    .size(11.0),
+                            );
                         }
 
-                        // Outline panel — only shown when the active tab has a parsed doc
+                        for i in 0..self.roots.len() {
+                            let root_name = self.roots[i].0.root.as_ref()
+                                .map(|n| n.name.clone())
+                                .unwrap_or_else(|| "?".to_string());
+
+                            // Root header: folder name + close button
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    egui::RichText::new(format!("📂 {root_name}"))
+                                        .strong()
+                                );
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    if ui.small_button("✕")
+                                        .on_hover_text("Close folder")
+                                        .clicked()
+                                    {
+                                        close_root = Some(i);
+                                    }
+                                });
+                            });
+                            ui.separator();
+
+                            if let Some(path) = render_sidebar(ui, &mut self.roots[i].0) {
+                                open_path = Some(path);
+                            }
+                            ui.add_space(4.0);
+                        }
+
+                        if let Some(path) = open_path  { self.open_tab(path); }
+                        if let Some(i) = close_root     { self.roots.remove(i); }
+
+                        // Outline — only for .md files with a parsed doc
                         let has_doc = self.active_tab
                             .and_then(|i| self.tabs.get(i))
-                            .map_or(false, |t| t.parsed_doc.is_some());
+                            .map_or(false, |t| t.parsed_doc.is_some() && is_markdown(&t.path));
 
                         if has_doc {
                             let idx = self.active_tab.unwrap();
-                            // SAFETY: has_doc guarantees both active_tab and parsed_doc are Some
                             let doc = self.tabs[idx].parsed_doc.as_ref().unwrap();
                             if let Some(block_idx) = render_outline(
                                 ui,
@@ -1192,4 +1258,9 @@ fn heading_byte_offset(buffer: &str, blocks: &[crate::markdown::Block], block_id
         byte_pos += raw_line.len() + 1; // +1 for the '\n'
     }
     None
+}
+
+/// Returns `true` when `path` has a `.md` extension.
+fn is_markdown(path: &std::path::Path) -> bool {
+    path.extension().and_then(|e| e.to_str()) == Some("md")
 }

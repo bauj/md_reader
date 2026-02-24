@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 /// Everything we want to survive across restarts.
 #[derive(Serialize, Deserialize, Default)]
 pub struct AppState {
-    /// Root directory shown in the sidebar.
-    pub root_dir: Option<PathBuf>,
+    /// Root directories shown in the sidebar (one per open folder).
+    pub root_dirs: Vec<PathBuf>,
     /// Ordered list of open tab paths (only those that still exist on disk are restored).
     pub open_tabs: Vec<PathBuf>,
     /// Index into `open_tabs` for the active tab.

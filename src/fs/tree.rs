@@ -88,8 +88,38 @@ impl FsTree {
 
 // ── Private helpers ───────────────────────────────────────────────────────────
 
+/// Extensions we consider plain-text / UTF-8 files and therefore worth showing.
+const TEXT_EXTENSIONS: &[&str] = &[
+    // Markdown / docs
+    "md", "mdx", "markdown", "txt", "text", "rst", "adoc", "tex",
+    // Config / data
+    "toml", "yaml", "yml", "json", "json5", "jsonc", "xml", "ini",
+    "cfg", "conf", "env", "properties",
+    // Web
+    "html", "htm", "css", "scss", "sass", "less", "svg",
+    // Scripts / shells
+    "sh", "bash", "zsh", "fish", "ps1",
+    // General programming languages
+    "rs", "py", "js", "mjs", "cjs", "ts", "jsx", "tsx",
+    "go", "java", "c", "h", "cpp", "hpp", "cc", "cxx",
+    "cs", "rb", "php", "swift", "kt", "kts", "scala",
+    "lua", "r", "m", "jl", "ex", "exs", "erl", "hs",
+    "ml", "mli", "clj", "cljs", "lisp", "el",
+    // Other text formats
+    "csv", "tsv", "sql", "graphql", "gql", "proto", "diff", "patch",
+    "dockerfile", "makefile", "mk",
+];
+
+fn is_text_file(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| TEXT_EXTENSIONS.contains(&e.to_lowercase().as_str()))
+        .unwrap_or(false)
+}
+
 /// Scan one directory level and return an unsorted-then-sorted list of nodes.
 /// Directories are returned with `children: None` (not yet loaded).
+/// Files are filtered to known text/UTF-8 extensions only.
 fn scan_one_level(path: &Path) -> Vec<FsNode> {
     let Ok(entries) = std::fs::read_dir(path) else { return Vec::new(); };
 
@@ -101,13 +131,15 @@ fn scan_one_level(path: &Path) -> Vec<FsNode> {
 
     entries
         .into_iter()
-        .map(|entry| {
+        .filter_map(|entry| {
             let entry_path = entry.path();
             let name = entry.file_name().to_string_lossy().to_string();
             if entry_path.is_dir() {
-                FsNode { name, path: entry_path, kind: FsNodeKind::Dir, children: None }
+                Some(FsNode { name, path: entry_path, kind: FsNodeKind::Dir, children: None })
+            } else if is_text_file(&entry_path) {
+                Some(FsNode { name, path: entry_path, kind: FsNodeKind::File, children: Some(Vec::new()) })
             } else {
-                FsNode { name, path: entry_path, kind: FsNodeKind::File, children: Some(Vec::new()) }
+                None // skip binary / unknown files
             }
         })
         .collect()

@@ -14,7 +14,7 @@ pub type HighlightedLines = Vec<HighlightedLine>;
 pub struct Highlighter {
     syntax_set: SyntaxSet,
     theme_set:  ThemeSet,
-    cache:      HashMap<(String, String), HighlightedLines>,
+    cache:      HashMap<(String, String, bool), HighlightedLines>,
 }
 
 impl Highlighter {
@@ -27,20 +27,22 @@ impl Highlighter {
     }
 
     /// Return highlighted lines for `(lang, code)`, using the cache.
-    pub fn highlight(&mut self, lang: &str, code: &str) -> &HighlightedLines {
-        let key = (lang.to_string(), code.to_string());
+    /// `light_bg` selects a light-friendly syntect theme when `true`.
+    pub fn highlight(&mut self, lang: &str, code: &str, light_bg: bool) -> &HighlightedLines {
+        let key = (lang.to_string(), code.to_string(), light_bg);
         if !self.cache.contains_key(&key) {
-            let lines = Self::do_highlight(&self.syntax_set, &self.theme_set, lang, code);
+            let lines = Self::do_highlight(&self.syntax_set, &self.theme_set, lang, code, light_bg);
             self.cache.insert(key.clone(), lines);
         }
         self.cache.get(&key).unwrap()
     }
 
     fn do_highlight(
-        ss:   &SyntaxSet,
-        ts:   &ThemeSet,
-        lang: &str,
-        code: &str,
+        ss:       &SyntaxSet,
+        ts:       &ThemeSet,
+        lang:     &str,
+        code:     &str,
+        light_bg: bool,
     ) -> HighlightedLines {
         let syntax = if lang.is_empty() {
             ss.find_syntax_plain_text()
@@ -49,7 +51,8 @@ impl Highlighter {
                 .unwrap_or_else(|| ss.find_syntax_plain_text())
         };
 
-        let theme = &ts.themes["base16-ocean.dark"];
+        let syntect_theme = if light_bg { "InspiredGitHub" } else { "base16-ocean.dark" };
+        let theme = &ts.themes[syntect_theme];
         let mut hl = HighlightLines::new(syntax, theme);
 
         LinesWithEndings::from(code)

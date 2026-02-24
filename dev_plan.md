@@ -618,6 +618,65 @@ Port of mdBook "Ayu".
 
 ---
 
+## Phase 8 — Markdown Syntax Highlighting in Edit Mode
+
+**Goal:** In Edit mode, the `TextEdit` plain-text buffer is replaced (or overlaid) with a
+syntax-aware view that colors markdown tokens while the user types — headings, bold/italic,
+code spans, code fences, links, blockquotes, list markers, etc.
+
+### Approach options
+
+| Option | Description | Pro | Con |
+|--------|-------------|-----|-----|
+| **A — Custom overlay painter** | Keep `TextEdit` for input; paint colored `LayoutJob` spans on top using `galley` output and a custom `Widget` | Cursor/selection behavior "for free" | Complex alignment with egui text layout |
+| **B — egui `CodeEditor`-style LayoutJob** | Replace the raw `TextEdit` with a widget that builds a `LayoutJob` per-line, coloring markdown tokens using a lightweight hand-written tokenizer | Clean, no external dep | Must reimplement cursor, wrapping |
+| **C — syntect for markdown** | Use syntect with its built-in `Markdown.sublime-syntax` to tokenize the buffer and feed the result into a read-only `Label` + a hidden `TextEdit` for edits | Reuses syntect already present | Requires synchronizing two widgets |
+
+**Recommended: Option B.** Build a `MarkdownEditor` widget that:
+1. Holds the text buffer internally (or borrows `&mut String`).
+2. Tokenizes each line with a minimal regex/pattern tokenizer (no full parser needed).
+3. Produces a `LayoutJob` with per-token `TextFormat` colors drawn from the active theme.
+4. Renders with `ui.add(TextEdit::multiline(...).layouter(...))` — egui `TextEdit` accepts
+   a custom `layouter` closure that returns a `Galley`, giving full cursor/selection support
+   at no extra cost.
+
+### Token categories & colors (per theme)
+
+| Token | Example | Color source |
+|-------|---------|--------------|
+| H1–H6 marker + text | `# Title` | `theme.sidebar_active` (accent) |
+| Bold | `**foo**` | brighter `fg` |
+| Italic | `*foo*` | `theme.fg_muted` |
+| Inline code | `` `code` `` | `theme.inline_code_fg` |
+| Code fence line | ` ``` ` | `theme.code_bg` tinted |
+| Link | `[text](url)` | `theme.link` |
+| Blockquote marker | `> ` | `theme.fg_muted` |
+| List marker | `- ` / `1. ` | `theme.fg_muted` |
+| Plain text | everything else | `theme.fg` |
+
+### Tasks
+
+- [ ] Add a `layouter` closure to the existing `TextEdit::multiline` in `app.rs` (Edit mode)
+- [ ] Implement `fn md_layouter(ui: &egui::Ui, text: &str, wrap_width: f32, theme: &Theme) -> Arc<egui::Galley>`
+  - Tokenize line-by-line with simple pattern matching (no parser dependency)
+  - Build `LayoutJob` with appropriate `TextFormat` per token
+  - Return `ui.fonts(|f| f.layout_job(job))`
+- [ ] Pass the current `theme` into the layouter closure (capture by value or use `ui.visuals()`)
+- [ ] Ensure the layouter invalidates (re-highlights) when the theme changes
+- [ ] Test with all 5 themes — confirm colors are readable on their respective backgrounds
+- [ ] Keep the layouter as a pure function (no state) so it can be called every frame cheaply
+
+### Crates introduced
+- None (reuses syntect already present, or pure Rust tokenizer — TBD)
+
+### Acceptance criteria
+- Markdown tokens are visibly colored in Edit mode while typing
+- Cursor, selection, undo/redo, and copy/paste all work unchanged
+- Colors adapt immediately when the user switches themes
+- No visible lag on files up to 5 000 lines
+
+---
+
 ## Crate Summary
 
 | Crate | Version | Purpose |

@@ -38,12 +38,12 @@ fn render_block(
     match block {
         Block::Heading(level, inlines) => {
             let size = match level {
-                1 => 32.0,
-                2 => 26.0,
-                3 => 22.0,
-                4 => 18.0,
-                5 => 16.0,
-                _ => 14.0,
+                1 => 28.0,  // H1
+                2 => 22.0,  // H2
+                3 => 18.0,  // H3
+                4 => 16.0,  // H4 (body size)
+                5 => 16.0,  // H5
+                _ => 14.0,  // H6+
             };
             ui.horizontal_wrapped(|ui| {
                 for inline in inlines {
@@ -70,7 +70,10 @@ fn render_block(
             let occ_base     = *occurrence; // global index of the first match in this block
 
             // ── Build LayoutJob: syntect fg colors + search bg overlays ──────
-            let lines    = hl.highlight(lang, code);
+            let bg = ui.visuals().panel_fill;
+            let luminance = 0.299 * bg.r() as f32 + 0.587 * bg.g() as f32 + 0.114 * bg.b() as f32;
+            let light_bg = luminance > 128.0;
+            let lines    = hl.highlight(lang, code, light_bg);
             let mut job  = LayoutJob::default();
             let mut bpos = 0usize; // byte cursor within `code`
 
@@ -121,7 +124,7 @@ fn render_block(
             *occurrence += code_matches.len();
 
             Frame::canvas(&ui.style())
-                .fill(Color32::from_gray(28))
+                .fill(ui.visuals().faint_bg_color)
                 .inner_margin(egui::Margin::symmetric(10, 8))
                 .corner_radius(4.0)
                 .show(ui, |ui| {
@@ -144,7 +147,8 @@ fn render_block(
                     egui::vec2(3.0, ui.spacing().interact_size.y.max(16.0)),
                     egui::Sense::hover(),
                 );
-                ui.painter().rect_filled(rect, 2.0, Color32::from_gray(100));
+                // Use a muted text color for the quote bar (works across themes)
+                ui.painter().rect_filled(rect, 2.0, ui.visuals().weak_text_color());
                 ui.add_space(6.0);
                 ui.vertical(|ui| {
                     ui.horizontal_wrapped(|ui| {
@@ -182,7 +186,7 @@ fn render_block(
             let occ = std::cell::Cell::new(*occurrence);
 
             Frame::canvas(&ui.style())
-                .fill(Color32::from_gray(24))
+                .fill(ui.visuals().faint_bg_color)
                 .corner_radius(4.0)
                 .show(ui, |ui| {
                     ui.set_width(ui.available_width());
@@ -267,7 +271,7 @@ fn render_inline(
             let match_count = match_offs.len();
 
             Frame::canvas(&ui.style())
-                .fill(Color32::from_gray(45))
+                .fill(ui.visuals().faint_bg_color)
                 .inner_margin(egui::Margin::symmetric(3, 1))
                 .corner_radius(3.0)
                 .show(ui, |ui| {

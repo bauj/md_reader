@@ -32,8 +32,19 @@ fn render_node(
             let arrow = if is_expanded { "▼" } else { "▶" };
             let label = format!("{} 📁 {}", arrow, node.name);
             let full_path = node.path.to_string_lossy();
+            let is_selected = selected.as_ref() == Some(&node.path);
 
-            if ui.selectable_label(selected.as_ref() == Some(&node.path), label)
+            // Folder color: slightly blue-tinted
+            let text = if is_selected {
+                egui::RichText::new(&label)
+                    .color(egui::Color32::from_rgb(0, 120, 220))
+                    .strong()
+            } else {
+                egui::RichText::new(&label)
+                    .color(egui::Color32::from_rgb(80, 120, 160))
+            };
+
+            if ui.selectable_label(is_selected, text)
                 .on_hover_text(full_path.as_ref())
                 .clicked() {
                 if is_expanded {
@@ -60,7 +71,19 @@ fn render_node(
         FsNodeKind::File => {
             let label = format!("📄 {}", node.name);
             let full_path = node.path.to_string_lossy();
-            if ui.selectable_label(selected.as_ref() == Some(&node.path), label)
+            let is_selected = selected.as_ref() == Some(&node.path);
+
+            // File color: slightly green-tinted
+            let text = if is_selected {
+                egui::RichText::new(&label)
+                    .color(egui::Color32::from_rgb(0, 140, 90))
+                    .strong()
+            } else {
+                egui::RichText::new(&label)
+                    .color(egui::Color32::from_rgb(100, 140, 100))
+            };
+
+            if ui.selectable_label(is_selected, text)
                 .on_hover_text(full_path.as_ref())
                 .clicked() {
                 *selected      = Some(node.path.clone());

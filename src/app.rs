@@ -6,6 +6,7 @@ use notify::Watcher;
 use crate::fs::FsTree;
 use crate::markdown::{parse_markdown, Highlighter, ParsedDoc, SearchOpts};
 use crate::persist;
+use crate::theme::ThemeId;
 use crate::ui::{render_outline, render_sidebar};
 
 /// Holds a live notify watcher and the channel end we poll each frame.
@@ -77,6 +78,7 @@ pub struct App {
     highlighter: Highlighter,
 
     view_mode: ViewMode,
+    active_theme: ThemeId,
 
     recent_files: Vec<PathBuf>,
 
@@ -119,6 +121,7 @@ impl App {
             active_tab:        None,
             highlighter:       Highlighter::new(),
             view_mode:         ViewMode::from_str(&state.view_mode),
+            active_theme:      Self::parse_theme(&state.theme),
             recent_files:      state.recent_files.into_iter().filter(|p| p.is_file()).collect(),
             pending_action:       None,
             dialog_focused_button: 0,
@@ -174,6 +177,16 @@ impl App {
         }
 
         app
+    }
+
+    fn parse_theme(s: &str) -> ThemeId {
+        match s {
+            "rust" => ThemeId::Rust,
+            "coal" => ThemeId::Coal,
+            "navy" => ThemeId::Navy,
+            "ayu" => ThemeId::Ayu,
+            _ => ThemeId::Light,
+        }
     }
 
     /// Recompute `search_matches` (raw buffer offsets for Edit mode) and
@@ -258,6 +271,13 @@ impl App {
 
     /// Snapshot current session into a `persist::AppState` and write it to disk.
     fn save_state(&self) {
+        let theme_str = match self.active_theme {
+            ThemeId::Light => "light",
+            ThemeId::Rust => "rust",
+            ThemeId::Coal => "coal",
+            ThemeId::Navy => "navy",
+            ThemeId::Ayu => "ayu",
+        };
         let state = persist::AppState {
             root_dirs:    self.roots.iter()
                               .filter_map(|(t, _)| t.root.as_ref().map(|n| n.path.clone()))
@@ -266,6 +286,7 @@ impl App {
             active_tab:   self.active_tab,
             view_mode:    self.view_mode.as_str().to_string(),
             recent_files: self.recent_files.clone(),
+            theme:        theme_str.to_string(),
         };
         persist::save(&state);
     }
@@ -381,9 +402,9 @@ impl App {
                 let name = tab.path.file_name()
                     .map(|n| n.to_string_lossy().to_string())
                     .unwrap_or_default();
-                if tab.modified { format!("md_reader — {name} ●") } else { format!("md_reader — {name}") }
+                if tab.modified { format!("Markdown Reader — {name} ●") } else { format!("Markdown Reader — {name}") }
             }
-            None => "md_reader".to_string(),
+            None => "Markdown Reader".to_string(),
         }
     }
 
@@ -406,6 +427,10 @@ impl App {
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(self.window_title()));
+
+        // ── Apply theme ────────────────────────────────────────────────────
+        apply_theme(ctx, self.active_theme);
+        let theme = crate::theme::theme_by_id(self.active_theme);
 
         // ── Keyboard shortcuts ────────────────────────────────────────────
         let ctrl_s     = ctx.input(|i| i.key_pressed(Key::S)        && i.modifiers.ctrl);
@@ -658,7 +683,11 @@ impl eframe::App for App {
         // ── Toolbar ───────────────────────────────────────────────────────
         let mode_before = self.view_mode;
 
-        TopBottomPanel::top("toolbar").show(ctx, |ui| {
+        TopBottomPanel::top("toolbar")
+            .frame(egui::Frame::none()
+                .fill(theme.toolbar_bg)
+                .inner_margin(egui::Margin::symmetric(8, 4)))
+            .show(ctx, |ui| {
             ui.horizontal(|ui| {
                 if ui.button("📁 Open Folder").on_hover_text("Open a folder in the sidebar").clicked() {
                     if let Some(path) = rfd::FileDialog::new().pick_folder() {
@@ -711,14 +740,26 @@ impl eframe::App for App {
 
                 ui.separator();
 
-                ui.selectable_value(&mut self.view_mode, ViewMode::Preview, "👁 Preview")
+                ui.selectable_value(&mut self.view_mode, ViewMode::Preview, "◆ Preview")
                     .on_hover_text("Preview markdown rendering");
                 if active_is_md {
-                    ui.selectable_value(&mut self.view_mode, ViewMode::Edit,  "✏ Edit")
+                    ui.selectable_value(&mut self.view_mode, ViewMode::Edit,  "▦ Edit")
                         .on_hover_text("Edit raw markdown");
-                    ui.selectable_value(&mut self.view_mode, ViewMode::Split, "⬜ Split")
+                    ui.selectable_value(&mut self.view_mode, ViewMode::Split, "▣ Split")
                         .on_hover_text("View editor and preview side-by-side");
                 }
+
+                ui.separator();
+
+                // Theme picker
+                ui.menu_button("◐ Theme", |ui| {
+                    for theme in crate::theme::THEMES {
+                        if ui.selectable_label(self.active_theme == theme.id, theme.name).clicked() {
+                            self.active_theme = theme.id;
+                            ui.close_menu();
+                        }
+                    }
+                }).response.on_hover_text("Choose color theme");
 
                 ui.separator();
 
@@ -728,12 +769,12 @@ impl eframe::App for App {
                         .map_or(false, |t| t.modified);
                     let has_active = self.active_tab.is_some();
 
-                    if ui.add_enabled(is_modified, egui::Button::new("💾 Save"))
+                    if ui.add_enabled(is_modified, egui::Button::new("▤ Save"))
                         .on_hover_text("Save current file (Ctrl+S)")
                         .clicked() {
                         self.save_active();
                     }
-                    if ui.add_enabled(has_active, egui::Button::new("✖ Close"))
+                    if ui.add_enabled(has_active, egui::Button::new("⊗ Close"))
                         .on_hover_text("Close current file (Ctrl+W)")
                         .clicked() {
                         if let Some(idx) = self.active_tab {
@@ -745,7 +786,11 @@ impl eframe::App for App {
         });
 
         // ── Tab bar ───────────────────────────────────────────────────────
-        TopBottomPanel::top("tab_bar").show(ctx, |ui| {
+        TopBottomPanel::top("tab_bar")
+            .frame(egui::Frame::none()
+                .fill(theme.tab_bar_bg)
+                .inner_margin(egui::Margin::symmetric(8, 4)))
+            .show(ctx, |ui| {
             ScrollArea::horizontal().show(ui, |ui| {
                 ui.horizontal(|ui| {
                     if self.tabs.is_empty() {
@@ -772,19 +817,20 @@ impl eframe::App for App {
                         let is_active = self.active_tab == Some(i);
                         let full_path = tab.path.to_string_lossy();
 
+                        // Tab label — use egui's native selectable_label so colors adapt to theme
                         if ui.selectable_label(is_active, &label)
                             .on_hover_text(full_path.as_ref())
                             .clicked() {
                             activate_idx = Some(i);
                         }
-                        if ui.small_button("✕")
-                            .on_hover_text("Close this file")
+
+                        if ui.small_button("⊗")
+                            .on_hover_text("Close this file (Ctrl+W)")
                             .clicked() {
                             close_idx = Some(i);
                         }
 
-                        // Visual separator between tabs
-                        ui.separator();
+                        ui.add_space(4.0);
                     }
 
                     if let Some(i) = activate_idx {
@@ -853,6 +899,9 @@ impl eframe::App for App {
         SidePanel::left("sidebar")
             .min_width(200.0)
             .default_width(250.0)
+            .frame(egui::Frame::none()
+                .fill(theme.sidebar_bg)
+                .inner_margin(egui::Margin::same(8)))
             .show(ctx, |ui| {
                 ScrollArea::vertical()
                     .auto_shrink([false; 2])
@@ -924,7 +973,11 @@ impl eframe::App for App {
             });
 
         // ── Status bar ────────────────────────────────────────────────────
-        TopBottomPanel::bottom("status_bar").show(ctx, |ui| {
+        TopBottomPanel::bottom("status_bar")
+            .frame(egui::Frame::none()
+                .fill(theme.toolbar_bg)
+                .inner_margin(egui::Margin::symmetric(8, 3)))
+            .show(ctx, |ui| {
             ui.horizontal(|ui| {
                 if let Some(tab) = self.active_tab.and_then(|i| self.tabs.get(i)) {
                     let line_count = tab.buffer.lines().count().max(1);
@@ -1380,4 +1433,68 @@ fn heading_byte_offset(buffer: &str, blocks: &[crate::markdown::Block], block_id
 /// Returns `true` when `path` has a `.md` extension.
 fn is_markdown(path: &std::path::Path) -> bool {
     path.extension().and_then(|e| e.to_str()) == Some("md")
+}
+
+/// Apply the active theme to egui's visuals.
+fn apply_theme(ctx: &egui::Context, theme_id: ThemeId) {
+    let theme = crate::theme::theme_by_id(theme_id);
+    let is_dark = matches!(theme_id, ThemeId::Rust | ThemeId::Coal | ThemeId::Navy | ThemeId::Ayu);
+
+    let mut visuals = if is_dark {
+        egui::Visuals::dark()
+    } else {
+        egui::Visuals::light()
+    };
+
+    // Apply theme colors
+    visuals.panel_fill = theme.bg;
+    visuals.window_fill = theme.bg;
+    visuals.override_text_color = Some(theme.fg);
+    visuals.hyperlink_color = theme.link;
+    visuals.selection.bg_fill = theme.selection_bg;
+    visuals.faint_bg_color = theme.code_bg;
+
+    // Button backgrounds — derived from toolbar_bg so they blend in but stay visible.
+    // For dark toolbars we lighten, for light toolbars we darken.
+    let lighten = |c: egui::Color32, d: i32| egui::Color32::from_rgb(
+        (c.r() as i32 + d).clamp(0, 255) as u8,
+        (c.g() as i32 + d).clamp(0, 255) as u8,
+        (c.b() as i32 + d).clamp(0, 255) as u8,
+    );
+    let delta = if is_dark { 25 } else { -20 };
+    let btn_normal  = lighten(theme.toolbar_bg, delta);
+    let btn_hovered = lighten(theme.toolbar_bg, delta + 20);
+    let btn_active  = lighten(theme.toolbar_bg, delta + 10);
+    let btn_text    = if is_dark { theme.sidebar_fg } else { theme.fg };
+    let stroke_w    = 1.0f32;
+
+    visuals.widgets.noninteractive.bg_fill        = theme.sidebar_bg;
+    visuals.widgets.noninteractive.weak_bg_fill   = theme.sidebar_bg;
+    visuals.widgets.noninteractive.fg_stroke      = egui::Stroke::new(stroke_w, btn_text);
+
+    visuals.widgets.inactive.bg_fill              = btn_normal;
+    visuals.widgets.inactive.weak_bg_fill         = btn_normal;
+    visuals.widgets.inactive.fg_stroke            = egui::Stroke::new(stroke_w, btn_text);
+
+    visuals.widgets.hovered.bg_fill               = btn_hovered;
+    visuals.widgets.hovered.weak_bg_fill          = btn_hovered;
+    visuals.widgets.hovered.fg_stroke             = egui::Stroke::new(stroke_w + 0.5, btn_text);
+
+    visuals.widgets.active.bg_fill                = btn_active;
+    visuals.widgets.active.weak_bg_fill           = btn_active;
+    visuals.widgets.active.fg_stroke              = egui::Stroke::new(stroke_w + 0.5, btn_text);
+
+    visuals.widgets.open.bg_fill                  = btn_hovered;
+    visuals.widgets.open.weak_bg_fill             = btn_hovered;
+    visuals.widgets.open.fg_stroke                = egui::Stroke::new(stroke_w, btn_text);
+
+    ctx.set_visuals(visuals);
+
+    // Increase body font size only — keep default horizontal spacing so table cells breathe
+    let mut style = (*ctx.style()).clone();
+    style.spacing.item_spacing = egui::vec2(8.0, 6.0);
+    style.text_styles.get_mut(&egui::TextStyle::Body).map(|f| {
+        f.size = 16.0;
+    });
+    ctx.set_style(style);
 }

@@ -14,6 +14,13 @@ pub struct AppState {
     pub view_mode: String,
     /// Most recently opened files, newest first. Capped at 20 entries.
     pub recent_files: Vec<PathBuf>,
+    /// Active theme: "light" | "rust" | "coal" | "navy" | "ayu".
+    #[serde(default = "default_theme")]
+    pub theme: String,
+}
+
+fn default_theme() -> String {
+    "light".to_string()
 }
 
 /// Returns the platform config path, e.g. `~/.config/md_reader/state.json` on Linux.

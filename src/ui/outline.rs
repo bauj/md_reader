@@ -69,10 +69,14 @@ pub fn render_outline(
         ui.horizontal(|ui| {
             ui.add_space(indent);
 
-            // Fold toggle — only shown for headings that have children.
+            // Fold toggle — plain clickable label, no button frame.
             if has_children {
                 let arrow = if is_collapsed { "▶" } else { "▼" };
-                if ui.small_button(arrow).clicked() {
+                let resp = ui.add(
+                    egui::Label::new(RichText::new(arrow).size(10.0))
+                        .sense(egui::Sense::click()),
+                );
+                if resp.clicked() {
                     if is_collapsed {
                         collapsed.remove(block_idx);
                     } else {
@@ -80,7 +84,7 @@ pub fn render_outline(
                     }
                 }
             } else {
-                ui.add_space(16.0); // keep titles aligned
+                ui.add_space(14.0); // keep titles aligned
             }
 
             let text = match level {

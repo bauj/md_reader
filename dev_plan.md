@@ -77,6 +77,13 @@ bold, italic, inline code, blockquotes, unordered/ordered lists, and tables.
     - Data rows with alternating row colors for readability
     - Cell padding and borders for clear separation
     - Right-align numeric columns (heuristic detection)
+  - **Bug — inline code in table cells not rendered:** backtick-wrapped spans inside
+    table cells (e.g. `` `foo` ``) are currently stored as raw strings in
+    `Vec<Vec<String>>` during parsing, so the backticks appear literally in the
+    rendered cell instead of being styled as inline code.
+    Fix: change the table IR from `Vec<Vec<String>>` to `Vec<Vec<Vec<Inline>>>` so
+    cells carry the same `Inline` enum as paragraphs, then call `render_inline` on each
+    cell's inline list during rendering.
 - Cache the `ParsedDoc` — only re-parse when the buffer changes (dirty flag)
 - Default view mode is **Preview**
 
@@ -296,7 +303,38 @@ highlighting.
 - Add "Clear Recent Files" option in the dropdown
 - Recent files list persists across sessions via state persistence
 
+#### Bug fix — lazy / async folder loading
+- **Problem:** opening a large folder (many nested sub-folders and files) blocks the UI
+  thread entirely during `FsTree::scan_dir()`, causing a visible freeze on startup or
+  when switching root directories.
+- **Root cause:** `scan_dir` is a synchronous recursive `std::fs::read_dir` walk called
+  directly in `App::new()` / the Ctrl+O handler, on the main thread.
+- **Fix — lazy expansion:** only scan a directory's children when the user expands it
+  in the sidebar (toggle arrow clicked). On first open, load only the root level:
+  - `FsTree::new(path)` scans **one level deep** only (no recursion)
+  - Each `FsNode::Dir` starts with `children: None` (unexpanded) instead of a
+    pre-populated `Vec`
+  - When the user clicks a folder's expand arrow, `FsTree::expand(path)` scans that
+    directory one level deep and populates its children
+  - Already-expanded nodes are not re-scanned unless explicitly refreshed
+- **Alternative / complement — background thread:** run `scan_dir` on a
+  `std::thread::spawn` thread and send the result back via `mpsc::channel`; show a
+  spinner or "Loading…" label in the sidebar while the scan is in progress
+- **Acceptance criteria:**
+  - Opening any folder (even one with thousands of sub-directories) returns
+    immediately with the root level visible
+  - Sub-directories expand on demand with no perceptible delay for typical depths
+  - The file watcher and `FsTree` rescan logic are updated to be consistent with
+    lazy loading
+
 #### UX Polish
+- **Tab key focus navigation in dialogs:** when a modal dialog is open (e.g. "Unsaved
+  changes — Save / Discard / Cancel"), pressing `Tab` should cycle focus through the
+  dialog's buttons only. Pressing `Enter` on the focused button activates it.
+  - Constrain `Tab` navigation to the dialog's widget scope (e.g. set `ui.scope` or
+    track focused widget IDs manually and cycle them)
+  - Prevents Tab from accidentally moving focus to background widgets while the dialog
+    is blocking interaction
 - Smooth scrolling in preview (egui ScrollArea handles this natively)
 - Clickable links in preview: `egui::Response::clicked()` → `open::that(url)`
 - Images in markdown: render inline with `egui_extras::RetainedImage` (load from
@@ -319,6 +357,18 @@ highlighting.
 - Matching: case-insensitive substring search over `self.buffer` on every keystroke
   - Collect all byte offsets of matches into `search_matches`
   - Show match count: "3 / 12" (current / total)
+- **Search options — two toggle buttons in the search bar:**
+  - **Match Case** (`Alt+C` when search bar focused): disables the `.to_lowercase()` normalization;
+    compare raw bytes instead. Button visually depressed when active.
+    Add `search_case_sensitive: bool` field to `App`.
+  - **Match Whole Word** (`Alt+W` when search bar focused): wraps each match candidate with a
+    word-boundary check — the character immediately before `match_start` and after `match_end`
+    (if they exist) must not be alphanumeric/underscore.
+    Add `search_whole_word: bool` field to `App`.
+  - Both flags feed into `update_search_matches()` and the `find_matches()` helper in the
+    renderer; re-run matching on every toggle.
+  - Keyboard shortcuts fire only when the search bar widget is focused
+    (same focus-gate pattern as `Enter`/`Shift+Enter`).
 - Navigation: `Enter` / `Shift+Enter` or ▲▼ buttons cycle through matches
   - Scroll the preview or editor to bring the current match into view
 - Highlighting in **Preview mode**: re-render paragraphs that contain a match,

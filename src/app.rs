@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use notify::Watcher;
 use crate::fs::FsTree;
-use crate::markdown::{parse_markdown, Highlighter, ParsedDoc};
+use crate::markdown::{parse_markdown, Highlighter, ParsedDoc, SearchOpts};
 use crate::persist;
 use crate::ui::{render_outline, render_sidebar};
 
@@ -83,6 +83,17 @@ pub struct App {
 
     pending_action: Option<PendingAction>,
 
+    // Search (Ctrl+F)
+    search_open:          bool,
+    search_query:         String,
+    search_matches:          Vec<usize>, // byte offsets into the raw buffer (Edit-mode layouter + occurrence index)
+    search_match_blocks:     Vec<usize>, // block index per match, from plain-text scan (Preview scroll)
+    search_current:          usize,      // index into search_matches
+    search_request_focus:    bool,       // request TextEdit focus on next frame
+    search_scroll_to_offset: Option<usize>, // byte offset to scroll Edit-mode TextEdit to
+    search_case_sensitive:   bool,
+    search_whole_word:       bool,
+
     // Outline panel
     outline_open:     bool,
     outline_collapsed: HashSet<usize>,
@@ -106,11 +117,20 @@ impl App {
             highlighter:       Highlighter::new(),
             view_mode:         ViewMode::from_str(&state.view_mode),
             recent_files:      state.recent_files.into_iter().filter(|p| p.is_file()).collect(),
-            watcher:           None,
-            pending_action:    None,
-            outline_open:      true,
-            outline_collapsed: HashSet::new(),
-            scroll_to_block:   None,
+            watcher:              None,
+            pending_action:       None,
+            search_open:             false,
+            search_query:            String::new(),
+            search_matches:          Vec::new(),
+            search_match_blocks:     Vec::new(),
+            search_current:          0,
+            search_request_focus:    false,
+            search_scroll_to_offset: None,
+            search_case_sensitive:   false,
+            search_whole_word:       false,
+            outline_open:         true,
+            outline_collapsed:    HashSet::new(),
+            scroll_to_block:      None,
         };
 
         if let Some(path) = initial_path {
@@ -152,6 +172,86 @@ impl App {
         }
 
         app
+    }
+
+    /// Recompute `search_matches` (raw buffer offsets for Edit mode) and
+    /// `search_match_blocks` (block indices for Preview scroll), then reset current.
+    fn update_search_matches(&mut self) {
+        self.search_matches.clear();
+        self.search_match_blocks.clear();
+        self.search_current = 0;
+
+        let opts = SearchOpts {
+            case_sensitive: self.search_case_sensitive,
+            whole_word:     self.search_whole_word,
+        };
+        let needle: String = if opts.case_sensitive {
+            self.search_query.clone()
+        } else {
+            self.search_query.to_lowercase()
+        };
+        if needle.is_empty() { return; }
+        let nlen = needle.len();
+
+        // Raw buffer search — used by the Edit-mode layouter.
+        if let Some(tab) = self.active_tab.and_then(|i| self.tabs.get(i)) {
+            let haystack: String = if opts.case_sensitive {
+                tab.buffer.clone()
+            } else {
+                tab.buffer.to_lowercase()
+            };
+            let mut p = 0;
+            while p < haystack.len() {
+                match haystack[p..].find(&needle as &str) {
+                    None => break,
+                    Some(rel) => {
+                        let ms = p + rel;
+                        let me = ms + nlen;
+                        if !opts.whole_word || is_word_boundary(&haystack, ms, me) {
+                            self.search_matches.push(ms);
+                            p = me;
+                        } else {
+                            p = ms + haystack[ms..].chars().next().map_or(1, |c| c.len_utf8());
+                        }
+                    }
+                }
+            }
+        }
+
+        // Plain-text block search — maps each match to its block for Preview scroll.
+        if let Some(doc) = self.active_tab
+            .and_then(|i| self.tabs.get(i))
+            .and_then(|t| t.parsed_doc.as_ref())
+        {
+            for (bi, block) in doc.blocks.iter().enumerate() {
+                let text = block_plain_text(block);
+                let haystack: String = if opts.case_sensitive { text } else { text.to_lowercase() };
+                let count = count_matches(&haystack, &needle, opts);
+                for _ in 0..count {
+                    self.search_match_blocks.push(bi);
+                }
+            }
+        }
+    }
+
+    /// Navigate to next/prev match and update both scroll mechanisms.
+    fn search_navigate(&mut self, forward: bool) {
+        let n = self.search_matches.len();
+        if n == 0 { return; }
+        self.search_current = if forward {
+            (self.search_current + 1) % n
+        } else {
+            (self.search_current + n - 1) % n
+        };
+        // Preview mode: scroll to the block containing this match.
+        if let Some(&bi) = self.search_match_blocks.get(self.search_current) {
+            self.scroll_to_block = Some(bi);
+        }
+        // Edit mode: scroll the TextEdit to the match byte offset.
+        self.search_scroll_to_offset = self.search_matches.get(self.search_current).copied();
+        // Re-request focus on the search bar so render_editor's request_focus()
+        // (called for scrolling) doesn't steal it away.
+        self.search_request_focus = true;
     }
 
     /// Snapshot current session into a `persist::AppState` and write it to disk.
@@ -291,8 +391,12 @@ impl eframe::App for App {
         let ctrl_w     = ctx.input(|i| i.key_pressed(Key::W)        && i.modifiers.ctrl);
         let ctrl_n     = ctx.input(|i| i.key_pressed(Key::N)        && i.modifiers.ctrl);
         let ctrl_q     = ctx.input(|i| i.key_pressed(Key::Q)        && i.modifiers.ctrl);
+        let ctrl_f     = ctx.input(|i| i.key_pressed(Key::F)        && i.modifiers.ctrl);
         let ctrl_left  = ctx.input(|i| i.key_pressed(Key::PageUp)   && i.modifiers.ctrl);
         let ctrl_right = ctx.input(|i| i.key_pressed(Key::PageDown) && i.modifiers.ctrl);
+        let escape     = ctx.input(|i| i.key_pressed(Key::Escape));
+        let enter      = ctx.input(|i| i.key_pressed(Key::Enter) && !i.modifiers.shift);
+        let shift_enter= ctx.input(|i| i.key_pressed(Key::Enter) &&  i.modifiers.shift);
 
         if ctrl_s { self.save_active(); }
         if ctrl_w {
@@ -310,6 +414,42 @@ impl eframe::App for App {
                 self.tree    = FsTree::new(path);
             }
         }
+        if ctrl_f {
+            if self.search_open {
+                // Ctrl+F again → focus the bar already open
+                self.search_request_focus = true;
+            } else {
+                self.search_open          = true;
+                self.search_request_focus = true;
+                self.update_search_matches();
+            }
+        }
+        if escape && self.search_open {
+            self.search_open    = false;
+            self.search_matches.clear();
+        }
+        // Only navigate on Enter/Shift+Enter when the search bar itself is focused,
+        // so typing in the editor doesn't accidentally trigger search navigation.
+        let search_input_id = egui::Id::new("search_input");
+        let search_bar_focused = ctx.memory(|m| m.focused() == Some(search_input_id));
+        if self.search_open && !self.search_matches.is_empty() && search_bar_focused {
+            if enter            { self.search_navigate(true);  }
+            else if shift_enter { self.search_navigate(false); }
+        }
+        // Alt+C / Alt+W toggle search options (gated to search bar focus).
+        if self.search_open && search_bar_focused {
+            let alt_c = ctx.input(|i| i.key_pressed(Key::C) && i.modifiers.alt);
+            let alt_w = ctx.input(|i| i.key_pressed(Key::W) && i.modifiers.alt);
+            if alt_c {
+                self.search_case_sensitive = !self.search_case_sensitive;
+                self.update_search_matches();
+            }
+            if alt_w {
+                self.search_whole_word = !self.search_whole_word;
+                self.update_search_matches();
+            }
+        }
+
         if ctrl_left || ctrl_right {
             if !self.tabs.is_empty() {
                 let cur  = self.active_tab.unwrap_or(0);
@@ -654,18 +794,40 @@ impl eframe::App for App {
                 }
                 Some(idx) => match self.view_mode {
                     ViewMode::Preview => {
-                        let tab = &self.tabs[idx];
-                        render_preview(ui, &tab.parsed_doc, &tab.buffer, scroll_to, "preview", &mut self.highlighter);
+                        let tab  = &self.tabs[idx];
+                        let sq   = self.search_query.as_str();
+                        let sc   = self.search_current;
+                        let opts = SearchOpts { case_sensitive: self.search_case_sensitive, whole_word: self.search_whole_word };
+                        render_preview(ui, &tab.parsed_doc, &tab.buffer, scroll_to, "preview", &mut self.highlighter, sq, sc, opts);
                     }
                     ViewMode::Edit => {
-                        let tab = &mut self.tabs[idx];
-                        render_editor(ui, &mut tab.buffer, &mut tab.modified, &mut tab.needs_reparse, "editor");
+                        let sm   = self.search_matches.as_slice();
+                        let opts = SearchOpts { case_sensitive: self.search_case_sensitive, whole_word: self.search_whole_word };
+                        let ql   = needle_len(&self.search_query, opts);
+                        let sc   = self.search_current;
+                        let sto  = self.search_scroll_to_offset.take();
+                        let buffer_changed = {
+                            let tab = &mut self.tabs[idx];
+                            let before = tab.needs_reparse;
+                            render_editor(ui, &mut tab.buffer, &mut tab.modified, &mut tab.needs_reparse, "editor", sm, ql, sc, sto);
+                            !before && tab.needs_reparse
+                        };
+                        // Keep search_matches in sync if the buffer was edited this frame.
+                        if buffer_changed && self.search_open {
+                            self.update_search_matches();
+                        }
                     }
                     ViewMode::Split => {
                         // Borrow separate fields before the closure so Rust
                         // captures them independently (Rust 2021 fine-grained capture).
-                        let tab = &mut self.tabs[idx];
-                        let hl  = &mut self.highlighter;
+                        let sm   = self.search_matches.clone();
+                        let opts = SearchOpts { case_sensitive: self.search_case_sensitive, whole_word: self.search_whole_word };
+                        let ql   = needle_len(&self.search_query, opts);
+                        let sc   = self.search_current;
+                        let sq   = self.search_query.clone();
+                        let sto  = self.search_scroll_to_offset.take();
+                        let tab  = &mut self.tabs[idx];
+                        let hl   = &mut self.highlighter;
                         ui.columns(2, |cols| {
                             render_editor(
                                 &mut cols[0],
@@ -673,6 +835,10 @@ impl eframe::App for App {
                                 &mut tab.modified,
                                 &mut tab.needs_reparse,
                                 "split_editor",
+                                &sm,
+                                ql,
+                                sc,
+                                sto,
                             );
                             render_preview(
                                 &mut cols[1],
@@ -681,12 +847,96 @@ impl eframe::App for App {
                                 scroll_to,
                                 "split_preview",
                                 hl,
+                                &sq,
+                                sc,
+                                opts,
                             );
                         });
                     }
                 },
             }
         });
+
+        // ── Floating search bar ───────────────────────────────────────────
+        if self.search_open {
+            let mut navigate:    Option<bool> = None; // Some(true)=next, Some(false)=prev
+            let mut close        = false;
+            let mut toggle_case  = false;
+            let mut toggle_word  = false;
+            let request_focus = self.search_request_focus;
+            self.search_request_focus = false;
+
+            egui::Area::new(egui::Id::new("search_bar"))
+                .anchor(egui::Align2::RIGHT_TOP, [-8.0, 110.0])
+                .order(egui::Order::Foreground)
+                .show(ctx, |ui| {
+                    egui::Frame::popup(ui.style()).show(ui, |ui| {
+                        ui.set_min_width(300.0);
+                        ui.horizontal(|ui| {
+                            // Query input — stable ID lets us check its focus state.
+                            let te = egui::TextEdit::singleline(&mut self.search_query)
+                                .hint_text("Search…")
+                                .desired_width(160.0)
+                                .id(egui::Id::new("search_input"));
+                            let resp = ui.add(te);
+                            if request_focus { resp.request_focus(); }
+                            if resp.changed() { self.update_search_matches(); }
+
+                            // Match count badge
+                            let badge = if self.search_query.is_empty() {
+                                String::new()
+                            } else if self.search_matches.is_empty() {
+                                "No results".to_string()
+                            } else {
+                                format!("{} / {}", self.search_current + 1, self.search_matches.len())
+                            };
+                            ui.label(egui::RichText::new(badge).color(egui::Color32::GRAY));
+
+                            // Option toggles: Match Case (Aa) and Match Whole Word (W)
+                            if ui.add(egui::Button::new("Aa").selected(self.search_case_sensitive))
+                                .on_hover_text("Match Case (Alt+C)")
+                                .clicked()
+                            {
+                                toggle_case = true;
+                            }
+                            if ui.add(egui::Button::new("W").selected(self.search_whole_word))
+                                .on_hover_text("Match Whole Word (Alt+W)")
+                                .clicked()
+                            {
+                                toggle_word = true;
+                            }
+
+                            // Navigation buttons
+                            let has = !self.search_matches.is_empty();
+                            if ui.add_enabled(has, egui::Button::new("▲")).clicked() {
+                                navigate = Some(false);
+                            }
+                            if ui.add_enabled(has, egui::Button::new("▼")).clicked() {
+                                navigate = Some(true);
+                            }
+
+                            // Close button
+                            if ui.button("✕").clicked() { close = true; }
+                        });
+                    });
+                });
+
+            if toggle_case {
+                self.search_case_sensitive = !self.search_case_sensitive;
+                self.update_search_matches();
+            }
+            if toggle_word {
+                self.search_whole_word = !self.search_whole_word;
+                self.update_search_matches();
+            }
+            if let Some(fwd) = navigate {
+                self.search_navigate(fwd);
+            }
+            if close {
+                self.search_open = false;
+                self.search_matches.clear();
+            }
+        }
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
@@ -695,19 +945,22 @@ impl eframe::App for App {
 }
 
 fn render_preview(
-    ui: &mut egui::Ui,
-    doc: &Option<ParsedDoc>,
-    buffer: &str,
-    scroll_to: Option<usize>,
-    id: &str,
-    hl: &mut Highlighter,
+    ui:             &mut egui::Ui,
+    doc:            &Option<ParsedDoc>,
+    buffer:         &str,
+    scroll_to:      Option<usize>,
+    id:             &str,
+    hl:             &mut Highlighter,
+    search_query:   &str,
+    search_current: usize,
+    opts:           SearchOpts,
 ) {
     ScrollArea::vertical()
         .id_salt(id)
         .auto_shrink([false; 2])
         .show(ui, |ui| {
             if let Some(doc) = doc {
-                crate::markdown::render_markdown(ui, doc, scroll_to, hl);
+                crate::markdown::render_markdown(ui, doc, scroll_to, hl, search_query, search_current, opts);
             } else if !buffer.is_empty() {
                 ui.label("Failed to parse markdown.");
             } else {
@@ -720,25 +973,172 @@ fn render_preview(
 }
 
 fn render_editor(
-    ui: &mut egui::Ui,
-    buffer: &mut String,
-    modified: &mut bool,
-    needs_reparse: &mut bool,
-    id: &str,
+    ui:               &mut egui::Ui,
+    buffer:           &mut String,
+    modified:         &mut bool,
+    needs_reparse:    &mut bool,
+    id:               &str,
+    search_matches:   &[usize],
+    query_len:        usize,
+    current_match:    usize,
+    scroll_to_offset: Option<usize>,
 ) {
     ScrollArea::vertical()
         .id_salt(id)
         .auto_shrink([false; 2])
         .show(ui, |ui| {
-            let response = ui.add(
-                TextEdit::multiline(buffer)
-                    .font(egui::TextStyle::Monospace)
-                    .desired_width(f32::INFINITY)
-                    .desired_rows(40),
-            );
-            if response.changed() {
+            let matches   = search_matches.to_vec(); // copy for closure
+            let cur       = current_match;
+            let qlen      = query_len;
+            let text_color = ui.visuals().text_color();
+
+            let mut layouter = move |ui: &egui::Ui, text: &str, wrap: f32| {
+                use egui::text::{LayoutJob, TextFormat};
+                use egui::FontId;
+
+                let mut job = LayoutJob::default();
+                let normal = TextFormat {
+                    font_id: FontId::monospace(13.0),
+                    color:   text_color,
+                    ..Default::default()
+                };
+
+                if matches.is_empty() || qlen == 0 {
+                    job.append(text, 0.0, normal);
+                } else {
+                    let mut pos = 0usize;
+                    for (mi, &start) in matches.iter().enumerate() {
+                        // Skip any offset that is out-of-range or not on a char boundary
+                        // (can happen when the buffer was edited this frame and matches
+                        // haven't been recomputed yet).
+                        if start >= text.len() || !text.is_char_boundary(start) { break; }
+                        // Advance end to the nearest char boundary.
+                        let raw_end = (start + qlen).min(text.len());
+                        let end = {
+                            let mut e = raw_end;
+                            while e < text.len() && !text.is_char_boundary(e) { e += 1; }
+                            e
+                        };
+                        if start > pos && text.is_char_boundary(pos) {
+                            job.append(&text[pos..start], 0.0, normal.clone());
+                        }
+                        let bg = if mi == cur {
+                            egui::Color32::from_rgb(255, 150, 0) // orange = current
+                        } else {
+                            egui::Color32::from_rgb(255, 220, 50) // yellow = other
+                        };
+                        job.append(&text[start..end], 0.0, TextFormat {
+                            font_id:    FontId::monospace(13.0),
+                            color:      egui::Color32::BLACK,
+                            background: bg,
+                            ..Default::default()
+                        });
+                        pos = end;
+                    }
+                    if pos < text.len() && text.is_char_boundary(pos) {
+                        job.append(&text[pos..], 0.0, normal);
+                    }
+                }
+
+                job.wrap.max_width = wrap;
+                ui.fonts(|f| f.layout_job(job))
+            };
+
+            let te_id = egui::Id::new(id).with("te");
+            // Use TextEdit::show() (instead of ui.add) to access the galley for
+            // accurate cursor-rect scrolling.
+            let output = TextEdit::multiline(buffer)
+                .id(te_id)
+                .font(egui::TextStyle::Monospace)
+                .desired_width(f32::INFINITY)
+                .desired_rows(40)
+                .layouter(&mut layouter)
+                .show(ui);
+
+            // Scroll so the current search match is visible: convert the byte offset
+            // to a char cursor, ask the galley for the pixel rect, then tell the
+            // enclosing ScrollArea to bring it into view.
+            if let Some(byte_offset) = scroll_to_offset {
+                let safe_offset = byte_offset.min(buffer.len());
+                let char_idx    = buffer[..safe_offset].chars().count();
+                let ccursor      = egui::text::CCursor::new(char_idx);
+                let cursor       = output.galley.from_ccursor(ccursor);
+                let local_rect   = output.galley.pos_from_cursor(&cursor);
+                // Translate from galley-local coords to screen coords.
+                let screen_rect  = local_rect.translate(output.response.rect.min.to_vec2());
+                ui.scroll_to_rect(screen_rect, Some(egui::Align::Center));
+            }
+
+            if output.response.changed() {
                 *modified      = true;
                 *needs_reparse = true;
             }
         });
+}
+
+// ── Search helpers ────────────────────────────────────────────────────────────
+
+/// Extract searchable plain text from a block (strips markdown syntax).
+fn block_plain_text(block: &crate::markdown::Block) -> String {
+    use crate::markdown::{Block, Inline};
+
+    fn inlines_text(inlines: &[Inline]) -> String {
+        inlines.iter().map(|il| match il {
+            Inline::Text(s) | Inline::Bold(s) | Inline::Italic(s)
+            | Inline::BoldItalic(s) | Inline::Code(s) => s.as_str(),
+            Inline::Link(t, _) => t.as_str(),
+        }).collect::<Vec<_>>().join("")
+    }
+
+    match block {
+        Block::Heading(_, ils) | Block::Paragraph(ils) | Block::BlockQuote(ils) => {
+            inlines_text(ils)
+        }
+        Block::List(_, items) => items.iter().map(|i| inlines_text(i)).collect::<Vec<_>>().join("\n"),
+        Block::CodeBlock(_, code) => code.clone(),
+        Block::Table(headers, rows) => {
+            let mut s = headers.join(" ");
+            for row in rows { s.push(' '); s.push_str(&row.join(" ")); }
+            s
+        }
+        Block::Rule => String::new(),
+    }
+}
+
+/// Count non-overlapping matches of `needle` in `haystack` (already lowercased if needed),
+/// respecting whole-word option. Needle/haystack must already have the same case transformation.
+fn count_matches(haystack: &str, needle: &str, opts: SearchOpts) -> usize {
+    if needle.is_empty() { return 0; }
+    let nlen = needle.len();
+    let mut count = 0;
+    let mut p = 0;
+    while p < haystack.len() {
+        match haystack[p..].find(needle) {
+            None => break,
+            Some(rel) => {
+                let ms = p + rel;
+                let me = ms + nlen;
+                if !opts.whole_word || is_word_boundary(haystack, ms, me) {
+                    count += 1;
+                    p = me;
+                } else {
+                    p = ms + haystack[ms..].chars().next().map_or(1, |c| c.len_utf8());
+                }
+            }
+        }
+    }
+    count
+}
+
+/// True if the substring `haystack[start..end]` is bounded by non-word characters.
+fn is_word_boundary(text: &str, start: usize, end: usize) -> bool {
+    let before = text[..start].chars().next_back();
+    let after  = text[end..].chars().next();
+    let is_word = |c: char| c.is_alphanumeric() || c == '_';
+    !before.map(is_word).unwrap_or(false) && !after.map(is_word).unwrap_or(false)
+}
+
+/// Byte length of the search needle after case normalisation.
+fn needle_len(query: &str, opts: SearchOpts) -> usize {
+    if opts.case_sensitive { query.len() } else { query.to_lowercase().len() }
 }

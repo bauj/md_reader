@@ -92,31 +92,4 @@ impl FsTree {
         })
     }
 
-    /// Returns all file paths in the tree in depth-first order.
-    pub fn all_files(&self) -> Vec<PathBuf> {
-        let mut files = Vec::new();
-        if let Some(ref root) = self.root {
-            Self::collect_files(root, &mut files);
-        }
-        files
-    }
-
-    fn collect_files(node: &FsNode, out: &mut Vec<PathBuf>) {
-        match node.kind {
-            FsNodeKind::File => out.push(node.path.clone()),
-            FsNodeKind::Dir  => node.children.iter().for_each(|c| Self::collect_files(c, out)),
-        }
-    }
-
-    pub fn toggle_expand(&mut self, path: PathBuf) {
-        if self.expanded.contains(&path) {
-            self.expanded.remove(&path);
-        } else {
-            self.expanded.insert(path);
-        }
-    }
-
-    pub fn select(&mut self, path: PathBuf) {
-        self.selected = Some(path);
-    }
 }

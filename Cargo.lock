@@ -1979,7 +1979,6 @@ dependencies = [
  "serde",
  "serde_json",
  "syntect",
- "walkdir",
 ]
 
 [[package]]

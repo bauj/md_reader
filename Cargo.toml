@@ -6,7 +6,6 @@ edition = "2024"
 [dependencies]
 eframe = "0.31"
 egui = "0.31"
-walkdir = "2"
 rfd = "0.15"
 pulldown-cmark = "0.12"
 open = "5"

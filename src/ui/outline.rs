@@ -58,8 +58,8 @@ pub fn render_outline(
         let has_children = headings[i + 1..]
             .iter()
             .take_while(|(l, _, _)| *l > *level)
-            .count()
-            > 0;
+            .next()
+            .is_some();
 
         let is_collapsed = collapsed.contains(block_idx);
         let indent = (*level - 1) as f32 * 12.0;

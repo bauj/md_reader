@@ -31,7 +31,11 @@ fn render_node(
                 selected.as_ref() == Some(&node.path),
                 label,
             ).clicked() {
-                expanded.insert(node.path.clone());
+                if expanded.contains(&node.path) {
+                    expanded.remove(&node.path);
+                } else {
+                    expanded.insert(node.path.clone());
+                }
             }
 
             // Render children if expanded

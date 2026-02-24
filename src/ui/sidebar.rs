@@ -31,8 +31,11 @@ fn render_node(
             let is_expanded = expanded.contains(&node.path);
             let arrow = if is_expanded { "▼" } else { "▶" };
             let label = format!("{} 📁 {}", arrow, node.name);
+            let full_path = node.path.to_string_lossy();
 
-            if ui.selectable_label(selected.as_ref() == Some(&node.path), label).clicked() {
+            if ui.selectable_label(selected.as_ref() == Some(&node.path), label)
+                .on_hover_text(full_path.as_ref())
+                .clicked() {
                 if is_expanded {
                     expanded.remove(&node.path);
                 } else {
@@ -56,7 +59,10 @@ fn render_node(
         }
         FsNodeKind::File => {
             let label = format!("📄 {}", node.name);
-            if ui.selectable_label(selected.as_ref() == Some(&node.path), label).clicked() {
+            let full_path = node.path.to_string_lossy();
+            if ui.selectable_label(selected.as_ref() == Some(&node.path), label)
+                .on_hover_text(full_path.as_ref())
+                .clicked() {
                 *selected      = Some(node.path.clone());
                 *selected_file = Some(node.path.clone());
             }

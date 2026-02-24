@@ -556,9 +556,21 @@ impl eframe::App for App {
                     ui.label(msg);
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
-                        if ui.button("💾 Save").clicked()    { choice = Some(true);  }
-                        if ui.button("🗑 Discard").clicked() { choice = Some(false); }
-                        if ui.button("Cancel").clicked()     { self.pending_action = None; }
+                        if ui.button("💾 Save")
+                            .on_hover_text("Save changes before closing")
+                            .clicked() {
+                            choice = Some(true);
+                        }
+                        if ui.button("🗑 Discard")
+                            .on_hover_text("Discard changes and close anyway")
+                            .clicked() {
+                            choice = Some(false);
+                        }
+                        if ui.button("Cancel")
+                            .on_hover_text("Go back and keep the file open")
+                            .clicked() {
+                            self.pending_action = None;
+                        }
                     });
                 });
 
@@ -600,7 +612,7 @@ impl eframe::App for App {
 
         TopBottomPanel::top("toolbar").show(ctx, |ui| {
             ui.horizontal(|ui| {
-                if ui.button("📁 Open Folder").clicked() {
+                if ui.button("📁 Open Folder").on_hover_text("Open a folder in the sidebar").clicked() {
                     if let Some(path) = rfd::FileDialog::new().pick_folder() {
                         self.add_root(path);
                     }
@@ -632,7 +644,9 @@ impl eframe::App for App {
                                     }
                                 }
                                 ui.separator();
-                                if ui.button("🗑 Clear recent files").clicked() {
+                                if ui.button("🗑 Clear recent files")
+                                    .on_hover_text("Clear all recently opened files")
+                                    .clicked() {
                                     clear = true;
                                     ui.close_menu();
                                 }
@@ -649,10 +663,13 @@ impl eframe::App for App {
 
                 ui.separator();
 
-                ui.selectable_value(&mut self.view_mode, ViewMode::Preview, "👁 Preview");
+                ui.selectable_value(&mut self.view_mode, ViewMode::Preview, "👁 Preview")
+                    .on_hover_text("Preview markdown rendering");
                 if active_is_md {
-                    ui.selectable_value(&mut self.view_mode, ViewMode::Edit,  "✏ Edit");
-                    ui.selectable_value(&mut self.view_mode, ViewMode::Split, "⬜ Split");
+                    ui.selectable_value(&mut self.view_mode, ViewMode::Edit,  "✏ Edit")
+                        .on_hover_text("Edit raw markdown");
+                    ui.selectable_value(&mut self.view_mode, ViewMode::Split, "⬜ Split")
+                        .on_hover_text("View editor and preview side-by-side");
                 }
 
                 ui.separator();
@@ -663,10 +680,14 @@ impl eframe::App for App {
                         .map_or(false, |t| t.modified);
                     let has_active = self.active_tab.is_some();
 
-                    if ui.add_enabled(is_modified, egui::Button::new("💾 Save")).clicked() {
+                    if ui.add_enabled(is_modified, egui::Button::new("💾 Save"))
+                        .on_hover_text("Save current file (Ctrl+S)")
+                        .clicked() {
                         self.save_active();
                     }
-                    if ui.add_enabled(has_active, egui::Button::new("✖ Close")).clicked() {
+                    if ui.add_enabled(has_active, egui::Button::new("✖ Close"))
+                        .on_hover_text("Close current file (Ctrl+W)")
+                        .clicked() {
                         if let Some(idx) = self.active_tab {
                             self.request_action(PendingAction::CloseTab(idx));
                         }
@@ -701,11 +722,16 @@ impl eframe::App for App {
                             format!(" {name} ")
                         };
                         let is_active = self.active_tab == Some(i);
+                        let full_path = tab.path.to_string_lossy();
 
-                        if ui.selectable_label(is_active, &label).clicked() {
+                        if ui.selectable_label(is_active, &label)
+                            .on_hover_text(full_path.as_ref())
+                            .clicked() {
                             activate_idx = Some(i);
                         }
-                        if ui.small_button("✕").clicked() {
+                        if ui.small_button("✕")
+                            .on_hover_text("Close this file")
+                            .clicked() {
                             close_idx = Some(i);
                         }
 

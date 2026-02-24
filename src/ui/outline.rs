@@ -16,7 +16,9 @@ pub fn render_outline(
     ui.separator();
 
     let header = if *open { "▼ Outline" } else { "▶ Outline" };
-    if ui.selectable_label(false, header).clicked() {
+    if ui.selectable_label(false, header)
+        .on_hover_text("Click to expand/collapse")
+        .clicked() {
         *open = !*open;
     }
 
@@ -86,7 +88,9 @@ pub fn render_outline(
                 2 => RichText::new(title.as_str()).size(12.0),
                 _ => RichText::new(title.as_str()).size(12.0).color(Color32::GRAY),
             };
-            if ui.selectable_label(false, text).clicked() {
+            if ui.selectable_label(false, text)
+                .on_hover_text(title.as_str())
+                .clicked() {
                 scroll_to = Some(*block_idx);
             }
         });

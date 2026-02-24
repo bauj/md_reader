@@ -1,3 +1,4 @@
+pub mod editor_highlight;
 pub mod highlight;
 pub mod parser;
 pub mod renderer;

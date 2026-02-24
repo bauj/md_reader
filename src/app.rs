@@ -684,7 +684,7 @@ impl eframe::App for App {
         let mode_before = self.view_mode;
 
         TopBottomPanel::top("toolbar")
-            .frame(egui::Frame::none()
+            .frame(egui::Frame::new()
                 .fill(theme.toolbar_bg)
                 .inner_margin(egui::Margin::symmetric(8, 4)))
             .show(ctx, |ui| {
@@ -787,7 +787,7 @@ impl eframe::App for App {
 
         // ── Tab bar ───────────────────────────────────────────────────────
         TopBottomPanel::top("tab_bar")
-            .frame(egui::Frame::none()
+            .frame(egui::Frame::new()
                 .fill(theme.tab_bar_bg)
                 .inner_margin(egui::Margin::symmetric(8, 4)))
             .show(ctx, |ui| {
@@ -899,7 +899,7 @@ impl eframe::App for App {
         SidePanel::left("sidebar")
             .min_width(200.0)
             .default_width(250.0)
-            .frame(egui::Frame::none()
+            .frame(egui::Frame::new()
                 .fill(theme.sidebar_bg)
                 .inner_margin(egui::Margin::same(8)))
             .show(ctx, |ui| {
@@ -974,7 +974,7 @@ impl eframe::App for App {
 
         // ── Status bar ────────────────────────────────────────────────────
         TopBottomPanel::bottom("status_bar")
-            .frame(egui::Frame::none()
+            .frame(egui::Frame::new()
                 .fill(theme.toolbar_bg)
                 .inner_margin(egui::Margin::symmetric(8, 3)))
             .show(ctx, |ui| {
@@ -1020,6 +1020,7 @@ impl eframe::App for App {
                         let opts = SearchOpts { case_sensitive: self.search_case_sensitive, whole_word: self.search_whole_word };
                         let ql   = needle_len(&self.search_query, opts);
                         let sc   = self.search_current;
+                        let tc   = make_token_colors(theme);
                         // Outline click: convert block index → raw buffer byte offset.
                         let outline_sto = scroll_to.and_then(|bi| {
                             let tab = &self.tabs[idx];
@@ -1031,7 +1032,7 @@ impl eframe::App for App {
                         let buffer_changed = {
                             let tab = &mut self.tabs[idx];
                             let before = tab.needs_reparse;
-                            let cpos = render_editor(ui, &mut tab.buffer, &mut tab.modified, &mut tab.needs_reparse, "editor", sm, ql, sc, sto);
+                            let cpos = render_editor(ui, &mut tab.buffer, &mut tab.modified, &mut tab.needs_reparse, "editor", sm, ql, sc, sto, tc);
                             self.cursor_pos = cpos;
                             !before && tab.needs_reparse
                         };
@@ -1056,6 +1057,7 @@ impl eframe::App for App {
                             })
                         });
                         let sto  = self.search_scroll_to_offset.take().or(outline_sto);
+                        let tc   = make_token_colors(theme);
                         let tab  = &mut self.tabs[idx];
                         let hl   = &mut self.highlighter;
                         let mut split_cursor: Option<(usize, usize)> = None;
@@ -1071,6 +1073,7 @@ impl eframe::App for App {
                                 ql,
                                 sc,
                                 sto,
+                                tc,
                             );
                             render_preview(
                                 &mut cols[1],
@@ -1220,62 +1223,83 @@ fn render_editor(
     query_len:        usize,
     current_match:    usize,
     scroll_to_offset: Option<usize>,
+    token_colors:     crate::markdown::editor_highlight::TokenColors,
 ) -> Option<(usize, usize)> {
     let mut cursor_out: Option<(usize, usize)> = None;
     ScrollArea::vertical()
         .id_salt(id)
         .auto_shrink([false; 2])
         .show(ui, |ui| {
-            let matches   = search_matches.to_vec(); // copy for closure
-            let cur       = current_match;
-            let qlen      = query_len;
-            let text_color = ui.visuals().text_color();
+            let matches = search_matches.to_vec();
+            let cur     = current_match;
+            let qlen    = query_len;
+            let tc      = token_colors; // Copy
 
             let mut layouter = move |ui: &egui::Ui, text: &str, wrap: f32| {
-                use egui::text::{LayoutJob, TextFormat};
-                use egui::FontId;
+                use egui::text::LayoutJob;
+                use crate::markdown::editor_highlight::syntax_spans;
 
+                // 1. Syntax-colored base spans
+                let base_spans = syntax_spans(text, tc);
+
+                // 2. Merge search highlight overlays on top.
+                //    Strategy: walk base_spans; split any span that overlaps a search
+                //    match into up to three pieces (before, match, after), applying
+                //    the highlight background to the match portion.
                 let mut job = LayoutJob::default();
-                let normal = TextFormat {
-                    font_id: FontId::monospace(13.0),
-                    color:   text_color,
-                    ..Default::default()
-                };
 
-                if matches.is_empty() || qlen == 0 {
-                    job.append(text, 0.0, normal);
+                // Build a flat list: for each search match → (start, end, bg_color)
+                let highlight_ranges: Vec<(usize, usize, egui::Color32)> = if qlen == 0 {
+                    vec![]
                 } else {
-                    let mut pos = 0usize;
-                    for (mi, &start) in matches.iter().enumerate() {
-                        // Skip any offset that is out-of-range or not on a char boundary
-                        // (can happen when the buffer was edited this frame and matches
-                        // haven't been recomputed yet).
-                        if start >= text.len() || !text.is_char_boundary(start) { break; }
-                        // Advance end to the nearest char boundary.
-                        let raw_end = (start + qlen).min(text.len());
+                    matches.iter().enumerate().filter_map(|(mi, &ms)| {
+                        let raw_end = ms + qlen;
+                        if ms > text.len() || !text.is_char_boundary(ms) { return None; }
                         let end = {
-                            let mut e = raw_end;
+                            let mut e = raw_end.min(text.len());
                             while e < text.len() && !text.is_char_boundary(e) { e += 1; }
                             e
                         };
-                        if start > pos && text.is_char_boundary(pos) {
-                            job.append(&text[pos..start], 0.0, normal.clone());
-                        }
+                        if ms >= end { return None; }
                         let bg = if mi == cur {
-                            egui::Color32::from_rgb(255, 150, 0) // orange = current
+                            egui::Color32::from_rgb(255, 150, 0)
                         } else {
-                            egui::Color32::from_rgb(255, 220, 50) // yellow = other
+                            egui::Color32::from_rgb(255, 220, 50)
                         };
-                        job.append(&text[start..end], 0.0, TextFormat {
-                            font_id:    FontId::monospace(13.0),
-                            color:      egui::Color32::BLACK,
-                            background: bg,
-                            ..Default::default()
-                        });
-                        pos = end;
+                        Some((ms, end, bg))
+                    }).collect()
+                };
+
+                for (span_start, span_end, base_fmt) in &base_spans {
+                    let (ss, se) = (*span_start, *span_end);
+                    if ss >= se || se > text.len() { continue; }
+
+                    // Find all highlight ranges that overlap this span
+                    let mut cursor = ss;
+                    for &(hs, he, bg) in &highlight_ranges {
+                        let overlap_s = hs.max(ss);
+                        let overlap_e = he.min(se);
+                        if overlap_s >= overlap_e { continue; }
+
+                        // Emit the part of the span before the highlight
+                        if cursor < overlap_s && text.is_char_boundary(cursor) && text.is_char_boundary(overlap_s) {
+                            job.append(&text[cursor..overlap_s], 0.0, base_fmt.clone());
+                        }
+                        // Emit the highlighted portion
+                        if text.is_char_boundary(overlap_s) && text.is_char_boundary(overlap_e) {
+                            job.append(&text[overlap_s..overlap_e], 0.0, egui::text::TextFormat {
+                                font_id:    base_fmt.font_id.clone(),
+                                color:      egui::Color32::BLACK,
+                                background: bg,
+                                ..Default::default()
+                            });
+                        }
+                        cursor = overlap_e;
                     }
-                    if pos < text.len() && text.is_char_boundary(pos) {
-                        job.append(&text[pos..], 0.0, normal);
+
+                    // Emit the remainder of the span after all highlights
+                    if cursor < se && text.is_char_boundary(cursor) && text.is_char_boundary(se) {
+                        job.append(&text[cursor..se], 0.0, base_fmt.clone());
                     }
                 }
 
@@ -1497,4 +1521,47 @@ fn apply_theme(ctx: &egui::Context, theme_id: ThemeId) {
         f.size = 16.0;
     });
     ctx.set_style(style);
+}
+
+/// Build editor token colors from the active theme.
+fn make_token_colors(theme: &crate::theme::Theme) -> crate::markdown::editor_highlight::TokenColors {
+    use crate::markdown::editor_highlight::TokenColors;
+    use egui::Color32;
+
+    let bg = theme.bg;
+    let luminance = 0.299 * bg.r() as f32 + 0.587 * bg.g() as f32 + 0.114 * bg.b() as f32;
+    let is_dark_bg = luminance < 128.0;
+
+    // Mix a color toward the background (for muted/dimmed variants).
+    let mix = |c: Color32, factor: f32| -> Color32 {
+        let f = factor.clamp(0.0, 1.0);
+        Color32::from_rgb(
+            (c.r() as f32 * (1.0 - f) + bg.r() as f32 * f) as u8,
+            (c.g() as f32 * (1.0 - f) + bg.g() as f32 * f) as u8,
+            (c.b() as f32 * (1.0 - f) + bg.b() as f32 * f) as u8,
+        )
+    };
+
+    let bold_color = if is_dark_bg {
+        Color32::from_rgb(255, 255, 255)
+    } else {
+        Color32::from_rgb(10, 10, 10)
+    };
+
+    TokenColors {
+        normal:         theme.fg,
+        heading:        theme.sidebar_active,
+        heading_marker: mix(theme.sidebar_active, 0.25),
+        bold:           bold_color,
+        italic:         mix(theme.fg, 0.3),
+        bold_italic:    bold_color,
+        inline_code:    theme.inline_code_fg,
+        code_block:     theme.fg_muted,
+        fence_marker:   mix(theme.inline_code_fg, 0.25),
+        link_text:      theme.link,
+        link_url:       mix(theme.link, 0.35),
+        list_marker:    theme.fg_muted,
+        blockquote:     theme.fg_muted,
+        hr:             theme.separator,
+    }
 }

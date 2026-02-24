@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use crate::fs::FsTree;
 use crate::markdown::{parse_markdown, Highlighter, ParsedDoc};
+use crate::persist;
 use crate::ui::{render_outline, render_sidebar};
 
 #[derive(PartialEq, Clone, Copy)]
@@ -10,6 +11,23 @@ pub enum ViewMode {
     Preview,
     Edit,
     Split,
+}
+
+impl ViewMode {
+    fn as_str(self) -> &'static str {
+        match self {
+            ViewMode::Preview => "preview",
+            ViewMode::Edit    => "edit",
+            ViewMode::Split   => "split",
+        }
+    }
+    fn from_str(s: &str) -> Self {
+        match s {
+            "edit"  => ViewMode::Edit,
+            "split" => ViewMode::Split,
+            _       => ViewMode::Preview,
+        }
+    }
 }
 
 /// What to do after the unsaved-changes dialog is resolved.
@@ -52,12 +70,14 @@ impl Default for App {
 
 impl App {
     pub fn new(initial_path: Option<std::path::PathBuf>) -> Self {
+        let state = persist::load();
+
         let mut app = App {
             tree:              FsTree::default(),
             tabs:              Vec::new(),
             active_tab:        None,
             highlighter:       Highlighter::new(),
-            view_mode:         ViewMode::Preview,
+            view_mode:         ViewMode::from_str(&state.view_mode),
             pending_action:    None,
             outline_open:      true,
             outline_collapsed: HashSet::new(),
@@ -65,6 +85,7 @@ impl App {
         };
 
         if let Some(path) = initial_path {
+            // CLI argument takes precedence; ignore persisted tabs/root.
             if !path.exists() {
                 eprintln!("md_reader: path not found: {}", path.display());
             } else if path.is_dir() {
@@ -75,9 +96,41 @@ impl App {
                 }
                 app.open_tab(path);
             }
+        } else {
+            // Restore last session.
+            if let Some(dir) = state.root_dir {
+                if dir.is_dir() {
+                    app.tree = FsTree::new(dir);
+                }
+            }
+            // Reopen tabs that still exist on disk (preserve order).
+            for path in state.open_tabs {
+                if path.is_file() {
+                    app.open_tab(path);
+                }
+            }
+            // Restore active tab (clamped to valid range).
+            if !app.tabs.is_empty() {
+                let idx = state.active_tab
+                    .unwrap_or(0)
+                    .min(app.tabs.len() - 1);
+                app.active_tab    = Some(idx);
+                app.tree.selected = Some(app.tabs[idx].path.clone());
+            }
         }
 
         app
+    }
+
+    /// Snapshot current session into a `persist::AppState` and write it to disk.
+    fn save_state(&self) {
+        let state = persist::AppState {
+            root_dir:   self.tree.root.as_ref().map(|n| n.path.clone()),
+            open_tabs:  self.tabs.iter().map(|t| t.path.clone()).collect(),
+            active_tab: self.active_tab,
+            view_mode:  self.view_mode.as_str().to_string(),
+        };
+        persist::save(&state);
     }
 }
 
@@ -288,6 +341,7 @@ impl eframe::App for App {
                     }
                     Some(PendingAction::Quit) => {
                         if save { self.save_all_modified(); }
+                        self.save_state();
                         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                     }
                     None => {}
@@ -472,6 +526,10 @@ impl eframe::App for App {
                 },
             }
         });
+    }
+
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.save_state();
     }
 }
 

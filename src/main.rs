@@ -1,6 +1,7 @@
 mod app;
 mod fs;
 mod markdown;
+mod persist;
 mod ui;
 
 use app::App;

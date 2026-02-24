@@ -12,7 +12,7 @@ pub enum Block {
     CodeBlock(String, String),       // language, code
     BlockQuote(Vec<Inline>),
     List(bool, Vec<Vec<Inline>>),    // ordered, items
-    Table(Vec<String>, Vec<Vec<String>>), // headers, rows
+    Table(Vec<Vec<Inline>>, Vec<Vec<Vec<Inline>>>), // headers, rows (each cell is a Vec<Inline>)
     Rule,
 }
 
@@ -43,7 +43,7 @@ pub fn parse_markdown(text: &str) -> ParsedDoc {
 
     // Block context
     #[derive(PartialEq)]
-    enum Ctx { None, Heading(u32), Paragraph, BlockQuote, ListItem, CodeBlock, TableHead, TableCell }
+    enum Ctx { None, Heading(u32), Paragraph, BlockQuote, ListItem, CodeBlock, TableCell }
     let mut ctx = Ctx::None;
 
     // List state
@@ -56,10 +56,9 @@ pub fn parse_markdown(text: &str) -> ParsedDoc {
     let mut code_buf = String::new();
 
     // Table state
-    let mut table_headers: Vec<String> = Vec::new();
-    let mut table_rows: Vec<Vec<String>> = Vec::new();
-    let mut table_cur_row: Vec<String> = Vec::new();
-    let mut table_cur_cell = String::new();
+    let mut table_headers: Vec<Vec<Inline>> = Vec::new();
+    let mut table_rows: Vec<Vec<Vec<Inline>>> = Vec::new();
+    let mut table_cur_row: Vec<Vec<Inline>> = Vec::new();
     let mut table_in_head = false;
 
     let push_text = |inlines: &mut Vec<Inline>, bold: bool, italic: bool, text: &str| {
@@ -114,7 +113,7 @@ pub fn parse_markdown(text: &str) -> ParsedDoc {
             Event::Start(Tag::TableHead) => { table_in_head = true; }
             Event::Start(Tag::TableRow)  => { table_cur_row.clear(); }
             Event::Start(Tag::TableCell) => {
-                table_cur_cell.clear();
+                current_inlines.clear();
                 ctx = Ctx::TableCell;
             }
 
@@ -157,9 +156,9 @@ pub fn parse_markdown(text: &str) -> ParsedDoc {
             }
             Event::End(TagEnd::TableCell) => {
                 if table_in_head {
-                    table_headers.push(std::mem::take(&mut table_cur_cell));
+                    table_headers.push(std::mem::take(&mut current_inlines));
                 } else {
-                    table_cur_row.push(std::mem::take(&mut table_cur_cell));
+                    table_cur_row.push(std::mem::take(&mut current_inlines));
                 }
                 ctx = Ctx::None;
             }
@@ -195,8 +194,6 @@ pub fn parse_markdown(text: &str) -> ParsedDoc {
             Event::Text(t) => {
                 if ctx == Ctx::CodeBlock {
                     code_buf.push_str(&t);
-                } else if ctx == Ctx::TableCell {
-                    table_cur_cell.push_str(&t);
                 } else if link_url.is_some() {
                     link_text.push_str(&t);
                 } else {
@@ -204,13 +201,7 @@ pub fn parse_markdown(text: &str) -> ParsedDoc {
                 }
             }
             Event::Code(c) => {
-                if ctx == Ctx::TableCell {
-                    table_cur_cell.push('`');
-                    table_cur_cell.push_str(&c);
-                    table_cur_cell.push('`');
-                } else {
-                    current_inlines.push(Inline::Code(c.to_string()));
-                }
+                current_inlines.push(Inline::Code(c.to_string()));
             }
             Event::SoftBreak => {
                 if ctx == Ctx::CodeBlock {

@@ -1097,8 +1097,11 @@ fn block_plain_text(block: &crate::markdown::Block) -> String {
         Block::List(_, items) => items.iter().map(|i| inlines_text(i)).collect::<Vec<_>>().join("\n"),
         Block::CodeBlock(_, code) => code.clone(),
         Block::Table(headers, rows) => {
-            let mut s = headers.join(" ");
-            for row in rows { s.push(' '); s.push_str(&row.join(" ")); }
+            let mut s = headers.iter().map(|h| inlines_text(h)).collect::<Vec<_>>().join(" ");
+            for row in rows {
+                s.push(' ');
+                s.push_str(&row.iter().map(|cell| inlines_text(cell)).collect::<Vec<_>>().join(" "));
+            }
             s
         }
         Block::Rule => String::new(),

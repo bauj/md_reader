@@ -176,6 +176,11 @@ fn render_block(
         Block::Table(headers, rows) => {
             let col_count = headers.len().max(1);
 
+            // Cell<usize> lets us thread the occurrence counter across the
+            // sequential-but-closure-based TableBuilder API without needing
+            // multiple &mut borrows to the same variable.
+            let occ = std::cell::Cell::new(*occurrence);
+
             Frame::canvas(&ui.style())
                 .fill(Color32::from_gray(24))
                 .corner_radius(4.0)
@@ -186,18 +191,30 @@ fn render_block(
                         .striped(true)
                         .columns(Column::remainder().resizable(true), col_count)
                         .header(24.0, |mut row| {
-                            for header in headers {
+                            for header_inlines in headers {
                                 row.col(|ui| {
-                                    ui.label(RichText::new(header.as_str()).strong());
+                                    ui.horizontal_wrapped(|ui| {
+                                        let mut o = occ.get();
+                                        for il in header_inlines {
+                                            render_inline(ui, il, None, true, search_query, search_current, opts, &mut o);
+                                        }
+                                        occ.set(o);
+                                    });
                                 });
                             }
                         })
                         .body(|mut body| {
                             for data_row in rows {
                                 body.row(20.0, |mut row| {
-                                    for cell in data_row.iter() {
+                                    for cell_inlines in data_row.iter() {
                                         row.col(|ui| {
-                                            ui.label(cell.as_str());
+                                            ui.horizontal_wrapped(|ui| {
+                                                let mut o = occ.get();
+                                                for il in cell_inlines {
+                                                    render_inline(ui, il, None, false, search_query, search_current, opts, &mut o);
+                                                }
+                                                occ.set(o);
+                                            });
                                         });
                                     }
                                     for _ in data_row.len()..col_count {
@@ -207,6 +224,8 @@ fn render_block(
                             }
                         });
                 });
+
+            *occurrence = occ.get();
         }
 
         Block::Rule => {

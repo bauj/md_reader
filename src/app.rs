@@ -97,6 +97,9 @@ pub struct App {
     outline_open:     bool,
     outline_collapsed: HashSet<usize>,
     scroll_to_block:  Option<usize>,
+
+    // Status bar — last known cursor position in the editor (1-indexed line, col).
+    cursor_pos: Option<(usize, usize)>,
 }
 
 impl Default for App {
@@ -129,6 +132,7 @@ impl App {
             outline_open:         true,
             outline_collapsed:    HashSet::new(),
             scroll_to_block:      None,
+            cursor_pos:           None,
         };
 
         if let Some(path) = initial_path {
@@ -845,6 +849,26 @@ impl eframe::App for App {
                     });
             });
 
+        // ── Status bar ────────────────────────────────────────────────────
+        TopBottomPanel::bottom("status_bar").show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                if let Some(tab) = self.active_tab.and_then(|i| self.tabs.get(i)) {
+                    let line_count = tab.buffer.lines().count().max(1);
+                    let word_count = tab.buffer.split_whitespace().count();
+                    if let Some((row, col)) = self.cursor_pos {
+                        ui.label(egui::RichText::new(format!("Ln {row}, Col {col}"))
+                            .color(egui::Color32::GRAY)
+                            .size(11.0));
+                    }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(egui::RichText::new(format!("Lines: {line_count}  Words: {word_count}"))
+                            .color(egui::Color32::GRAY)
+                            .size(11.0));
+                    });
+                }
+            });
+        });
+
         // ── Central panel ─────────────────────────────────────────────────
         let scroll_to = self.scroll_to_block.take();
         CentralPanel::default().show(ctx, |ui| {
@@ -857,6 +881,7 @@ impl eframe::App for App {
                 }
                 Some(idx) => match self.view_mode {
                     ViewMode::Preview => {
+                        self.cursor_pos = None;
                         let tab  = &self.tabs[idx];
                         let sq   = self.search_query.as_str();
                         let sc   = self.search_current;
@@ -879,7 +904,8 @@ impl eframe::App for App {
                         let buffer_changed = {
                             let tab = &mut self.tabs[idx];
                             let before = tab.needs_reparse;
-                            render_editor(ui, &mut tab.buffer, &mut tab.modified, &mut tab.needs_reparse, "editor", sm, ql, sc, sto);
+                            let cpos = render_editor(ui, &mut tab.buffer, &mut tab.modified, &mut tab.needs_reparse, "editor", sm, ql, sc, sto);
+                            self.cursor_pos = cpos;
                             !before && tab.needs_reparse
                         };
                         // Keep search_matches in sync if the buffer was edited this frame.
@@ -905,8 +931,10 @@ impl eframe::App for App {
                         let sto  = self.search_scroll_to_offset.take().or(outline_sto);
                         let tab  = &mut self.tabs[idx];
                         let hl   = &mut self.highlighter;
+                        let mut split_cursor: Option<(usize, usize)> = None;
+                        {
                         ui.columns(2, |cols| {
-                            render_editor(
+                            split_cursor = render_editor(
                                 &mut cols[0],
                                 &mut tab.buffer,
                                 &mut tab.modified,
@@ -929,6 +957,8 @@ impl eframe::App for App {
                                 opts,
                             );
                         });
+                        }
+                        self.cursor_pos = split_cursor;
                     }
                 },
             }
@@ -1049,6 +1079,10 @@ fn render_preview(
         });
 }
 
+/// Returns the current cursor position as `Some((line, col))` (both 1-indexed)
+/// when the TextEdit is focused, or `None` otherwise.
+/// Returns the current cursor position as `Some((line, col))` (both 1-indexed)
+/// when the TextEdit is focused, or `None` otherwise.
 fn render_editor(
     ui:               &mut egui::Ui,
     buffer:           &mut String,
@@ -1059,7 +1093,8 @@ fn render_editor(
     query_len:        usize,
     current_match:    usize,
     scroll_to_offset: Option<usize>,
-) {
+) -> Option<(usize, usize)> {
+    let mut cursor_out: Option<(usize, usize)> = None;
     ScrollArea::vertical()
         .id_salt(id)
         .auto_shrink([false; 2])
@@ -1150,7 +1185,13 @@ fn render_editor(
                 *modified      = true;
                 *needs_reparse = true;
             }
+
+            cursor_out = output.cursor_range.map(|r| (
+                r.primary.rcursor.row + 1,
+                r.primary.rcursor.column + 1,
+            ));
         });
+    cursor_out
 }
 
 // ── Search helpers ────────────────────────────────────────────────────────────

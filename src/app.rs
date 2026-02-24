@@ -1,10 +1,31 @@
 use egui::{CentralPanel, Key, ScrollArea, SidePanel, TextEdit, TopBottomPanel};
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::mpsc;
+use notify::Watcher;
 use crate::fs::FsTree;
 use crate::markdown::{parse_markdown, Highlighter, ParsedDoc};
 use crate::persist;
 use crate::ui::{render_outline, render_sidebar};
+
+/// Holds a live notify watcher and the channel end we poll each frame.
+struct FileWatcher {
+    // Kept alive so the background thread keeps running.
+    _watcher: notify::RecommendedWatcher,
+    rx: mpsc::Receiver<notify::Result<notify::Event>>,
+}
+
+impl FileWatcher {
+    fn new(path: &Path) -> Option<Self> {
+        let (tx, rx) = mpsc::channel();
+        let mut watcher = notify::RecommendedWatcher::new(
+            move |res| { let _ = tx.send(res); },
+            notify::Config::default(),
+        ).ok()?;
+        watcher.watch(path, notify::RecursiveMode::Recursive).ok()?;
+        Some(FileWatcher { _watcher: watcher, rx })
+    }
+}
 
 #[derive(PartialEq, Clone, Copy)]
 pub enum ViewMode {
@@ -37,11 +58,13 @@ enum PendingAction {
 }
 
 pub struct OpenTab {
-    path:         PathBuf,
-    buffer:       String,
-    modified:     bool,
-    parsed_doc:   Option<ParsedDoc>,
+    path:          PathBuf,
+    buffer:        String,
+    modified:      bool,
+    parsed_doc:    Option<ParsedDoc>,
     needs_reparse: bool,
+    /// File was changed on disk while we have unsaved local edits.
+    extern_modified: bool,
 }
 
 pub struct App {
@@ -55,6 +78,8 @@ pub struct App {
     view_mode: ViewMode,
 
     recent_files: Vec<PathBuf>,
+
+    watcher: Option<FileWatcher>,
 
     pending_action: Option<PendingAction>,
 
@@ -81,6 +106,7 @@ impl App {
             highlighter:       Highlighter::new(),
             view_mode:         ViewMode::from_str(&state.view_mode),
             recent_files:      state.recent_files.into_iter().filter(|p| p.is_file()).collect(),
+            watcher:           None,
             pending_action:    None,
             outline_open:      true,
             outline_collapsed: HashSet::new(),
@@ -92,9 +118,11 @@ impl App {
             if !path.exists() {
                 eprintln!("md_reader: path not found: {}", path.display());
             } else if path.is_dir() {
+                app.watcher = FileWatcher::new(&path);
                 app.tree = FsTree::new(path);
             } else if path.is_file() {
                 if let Some(parent) = path.parent() {
+                    app.watcher = FileWatcher::new(parent);
                     app.tree = FsTree::new(parent.to_path_buf());
                 }
                 app.open_tab(path);
@@ -103,6 +131,7 @@ impl App {
             // Restore last session.
             if let Some(dir) = state.root_dir {
                 if dir.is_dir() {
+                    app.watcher = FileWatcher::new(&dir);
                     app.tree = FsTree::new(dir);
                 }
             }
@@ -159,10 +188,11 @@ impl App {
                 self.tree.selected = Some(path.clone());
                 self.tabs.push(OpenTab {
                     path,
-                    buffer:        content,
-                    modified:      false,
-                    parsed_doc:    None,
-                    needs_reparse: true,
+                    buffer:          content,
+                    modified:        false,
+                    parsed_doc:      None,
+                    needs_reparse:   true,
+                    extern_modified: false,
                 });
                 self.active_tab = Some(self.tabs.len() - 1);
             }
@@ -276,7 +306,8 @@ impl eframe::App for App {
         if ctrl_n { self.create_new_file(); }
         if ctrl_o {
             if let Some(path) = rfd::FileDialog::new().pick_folder() {
-                self.tree = FsTree::new(path);
+                self.watcher = FileWatcher::new(&path);
+                self.tree    = FsTree::new(path);
             }
         }
         if ctrl_left || ctrl_right {
@@ -289,6 +320,43 @@ impl eframe::App for App {
                 };
                 self.active_tab    = Some(next);
                 self.tree.selected = Some(self.tabs[next].path.clone());
+            }
+        }
+
+        // ── File-watcher events ───────────────────────────────────────────
+        let mut rescan_tree = false;
+        if let Some(ref w) = self.watcher {
+            while let Ok(Ok(event)) = w.rx.try_recv() {
+                use notify::EventKind::*;
+                match event.kind {
+                    Modify(_) => {
+                        for path in &event.paths {
+                            if let Some(tab) = self.tabs.iter_mut().find(|t| &t.path == path) {
+                                if tab.modified {
+                                    // User has unsaved edits — flag for the banner.
+                                    tab.extern_modified = true;
+                                } else {
+                                    // No local edits — silently reload.
+                                    if let Ok(content) = std::fs::read_to_string(&tab.path) {
+                                        tab.buffer        = content;
+                                        tab.needs_reparse = true;
+                                        tab.extern_modified = false;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Create(_) | Remove(_) | Other => {
+                        rescan_tree = true;
+                    }
+                    _ => {}
+                }
+            }
+        }
+        if rescan_tree {
+            if let Some(ref root) = self.tree.root {
+                let root_path = root.path.clone();
+                self.tree = FsTree::new(root_path);
             }
         }
 
@@ -368,7 +436,8 @@ impl eframe::App for App {
             ui.horizontal(|ui| {
                 if ui.button("📁 Open Folder").clicked() {
                     if let Some(path) = rfd::FileDialog::new().pick_folder() {
-                        self.tree = FsTree::new(path);
+                        self.watcher = FileWatcher::new(&path);
+                        self.tree    = FsTree::new(path);
                     }
                 }
 
@@ -496,6 +565,45 @@ impl eframe::App for App {
             let created = self.create_new_file();
             if !created {
                 self.view_mode = ViewMode::Preview;
+            }
+        }
+
+        // ── External-modification banner ──────────────────────────────────
+        // Shown when the active tab was changed on disk while we have local edits.
+        let extern_mod = self.active_tab
+            .and_then(|i| self.tabs.get(i))
+            .map_or(false, |t| t.extern_modified);
+
+        if extern_mod {
+            let mut reload = false;
+            let mut keep   = false;
+            TopBottomPanel::top("extern_mod_banner").show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new("⚠ File changed on disk")
+                            .color(egui::Color32::from_rgb(220, 160, 0))
+                            .strong(),
+                    );
+                    ui.add_space(8.0);
+                    if ui.button("Reload").clicked() { reload = true; }
+                    if ui.button("Keep mine").clicked() { keep = true; }
+                });
+            });
+            if reload {
+                if let Some(idx) = self.active_tab {
+                    let tab = &mut self.tabs[idx];
+                    if let Ok(content) = std::fs::read_to_string(&tab.path) {
+                        tab.buffer          = content;
+                        tab.modified        = false;
+                        tab.needs_reparse   = true;
+                        tab.extern_modified = false;
+                    }
+                }
+            }
+            if keep {
+                if let Some(idx) = self.active_tab {
+                    self.tabs[idx].extern_modified = false;
+                }
             }
         }
 

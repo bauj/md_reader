@@ -12,6 +12,8 @@ pub struct AppState {
     pub active_tab: Option<usize>,
     /// Last used view mode: "preview" | "edit" | "split".
     pub view_mode: String,
+    /// Most recently opened files, newest first. Capped at 20 entries.
+    pub recent_files: Vec<PathBuf>,
 }
 
 /// Returns the platform config path, e.g. `~/.config/md_reader/state.json` on Linux.

@@ -54,6 +54,8 @@ pub struct App {
 
     view_mode: ViewMode,
 
+    recent_files: Vec<PathBuf>,
+
     pending_action: Option<PendingAction>,
 
     // Outline panel
@@ -78,6 +80,7 @@ impl App {
             active_tab:        None,
             highlighter:       Highlighter::new(),
             view_mode:         ViewMode::from_str(&state.view_mode),
+            recent_files:      state.recent_files.into_iter().filter(|p| p.is_file()).collect(),
             pending_action:    None,
             outline_open:      true,
             outline_collapsed: HashSet::new(),
@@ -125,18 +128,27 @@ impl App {
     /// Snapshot current session into a `persist::AppState` and write it to disk.
     fn save_state(&self) {
         let state = persist::AppState {
-            root_dir:   self.tree.root.as_ref().map(|n| n.path.clone()),
-            open_tabs:  self.tabs.iter().map(|t| t.path.clone()).collect(),
-            active_tab: self.active_tab,
-            view_mode:  self.view_mode.as_str().to_string(),
+            root_dir:     self.tree.root.as_ref().map(|n| n.path.clone()),
+            open_tabs:    self.tabs.iter().map(|t| t.path.clone()).collect(),
+            active_tab:   self.active_tab,
+            view_mode:    self.view_mode.as_str().to_string(),
+            recent_files: self.recent_files.clone(),
         };
         persist::save(&state);
     }
 }
 
 impl App {
+    /// Push `path` to the front of the recent-files list, deduplicating and capping at 20.
+    fn push_recent(&mut self, path: &PathBuf) {
+        self.recent_files.retain(|p| p != path);
+        self.recent_files.insert(0, path.clone());
+        self.recent_files.truncate(20);
+    }
+
     /// Open a file in a new tab, or focus its existing tab if already open.
     fn open_tab(&mut self, path: PathBuf) {
+        self.push_recent(&path);
         if let Some(idx) = self.tabs.iter().position(|t| t.path == path) {
             self.active_tab = Some(idx);
             self.tree.selected = Some(path);
@@ -358,6 +370,47 @@ impl eframe::App for App {
                     if let Some(path) = rfd::FileDialog::new().pick_folder() {
                         self.tree = FsTree::new(path);
                     }
+                }
+
+                // ── Recent files dropdown ─────────────────────────────────
+                let mut open_path: Option<PathBuf> = None;
+                let mut clear     = false;
+
+                ui.menu_button("🕐 Recent", |ui| {
+                    if self.recent_files.is_empty() {
+                        ui.label(
+                            egui::RichText::new("No recent files")
+                                .color(egui::Color32::GRAY),
+                        );
+                    } else {
+                        egui::ScrollArea::vertical()
+                            .max_height(300.0)
+                            .show(ui, |ui| {
+                                for path in &self.recent_files {
+                                    let label = path
+                                        .file_name()
+                                        .map(|n| n.to_string_lossy().to_string())
+                                        .unwrap_or_default();
+                                    let tip = path.to_string_lossy();
+                                    if ui.button(&label).on_hover_text(tip.as_ref()).clicked() {
+                                        open_path = Some(path.clone());
+                                        ui.close_menu();
+                                    }
+                                }
+                                ui.separator();
+                                if ui.button("🗑 Clear recent files").clicked() {
+                                    clear = true;
+                                    ui.close_menu();
+                                }
+                            });
+                    }
+                });
+
+                if let Some(path) = open_path {
+                    self.open_tab(path);
+                }
+                if clear {
+                    self.recent_files.clear();
                 }
 
                 ui.separator();

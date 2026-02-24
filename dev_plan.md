@@ -301,6 +301,11 @@ highlighting.
 - Clickable links in preview: `egui::Response::clicked()` → `open::that(url)`
 - Images in markdown: render inline with `egui_extras::RetainedImage` (load from
   relative path or URL)
+- **Tooltips:** add `.on_hover_text()` to interactive elements throughout the UI:
+  - Tab bar: hovering a tab shows the full absolute path of the file
+  - Toolbar buttons: short description of each action (e.g. "Open a folder in the sidebar")
+  - Sidebar file entries: full path on hover
+  - Outline headings: full heading text on hover (useful when truncated)
 #### Search (Ctrl+F)
 - Toggle a search bar with `Ctrl+F`; pressing `Escape` or `Ctrl+F` again dismisses it
 - Search bar appears as a floating overlay in the top-right corner of the central panel

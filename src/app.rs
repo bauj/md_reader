@@ -805,7 +805,14 @@ impl eframe::App for App {
                         let opts = SearchOpts { case_sensitive: self.search_case_sensitive, whole_word: self.search_whole_word };
                         let ql   = needle_len(&self.search_query, opts);
                         let sc   = self.search_current;
-                        let sto  = self.search_scroll_to_offset.take();
+                        // Outline click: convert block index → raw buffer byte offset.
+                        let outline_sto = scroll_to.and_then(|bi| {
+                            let tab = &self.tabs[idx];
+                            tab.parsed_doc.as_ref().and_then(|doc| {
+                                heading_byte_offset(&tab.buffer, &doc.blocks, bi)
+                            })
+                        });
+                        let sto = self.search_scroll_to_offset.take().or(outline_sto);
                         let buffer_changed = {
                             let tab = &mut self.tabs[idx];
                             let before = tab.needs_reparse;
@@ -825,7 +832,14 @@ impl eframe::App for App {
                         let ql   = needle_len(&self.search_query, opts);
                         let sc   = self.search_current;
                         let sq   = self.search_query.clone();
-                        let sto  = self.search_scroll_to_offset.take();
+                        // Outline click: same byte-offset conversion for the editor pane.
+                        let outline_sto = scroll_to.and_then(|bi| {
+                            let tab = &self.tabs[idx];
+                            tab.parsed_doc.as_ref().and_then(|doc| {
+                                heading_byte_offset(&tab.buffer, &doc.blocks, bi)
+                            })
+                        });
+                        let sto  = self.search_scroll_to_offset.take().or(outline_sto);
                         let tab  = &mut self.tabs[idx];
                         let hl   = &mut self.highlighter;
                         ui.columns(2, |cols| {
@@ -1066,7 +1080,7 @@ fn render_editor(
                 let local_rect   = output.galley.pos_from_cursor(&cursor);
                 // Translate from galley-local coords to screen coords.
                 let screen_rect  = local_rect.translate(output.response.rect.min.to_vec2());
-                ui.scroll_to_rect(screen_rect, Some(egui::Align::Center));
+                ui.scroll_to_rect(screen_rect, Some(egui::Align::TOP));
             }
 
             if output.response.changed() {
@@ -1144,4 +1158,41 @@ fn is_word_boundary(text: &str, start: usize, end: usize) -> bool {
 /// Byte length of the search needle after case normalisation.
 fn needle_len(query: &str, opts: SearchOpts) -> usize {
     if opts.case_sensitive { query.len() } else { query.to_lowercase().len() }
+}
+
+/// Find the byte offset in `buffer` of the heading at `block_idx`.
+/// Scans the raw markdown line by line, matching `# … ` prefixes, and handles
+/// duplicate headings by counting earlier blocks with the same level + text.
+fn heading_byte_offset(buffer: &str, blocks: &[crate::markdown::Block], block_idx: usize) -> Option<usize> {
+    use crate::markdown::{Block, Inline};
+
+    let Block::Heading(level, inlines) = blocks.get(block_idx)? else { return None; };
+
+    fn inline_text(ils: &[Inline]) -> String {
+        ils.iter().map(|il| match il {
+            Inline::Text(s) | Inline::Bold(s) | Inline::Italic(s)
+            | Inline::BoldItalic(s) | Inline::Code(s) => s.as_str(),
+            Inline::Link(t, _) => t.as_str(),
+        }).collect()
+    }
+
+    let target = inline_text(inlines);
+    let prefix = format!("{} ", "#".repeat(*level as usize));
+
+    // How many earlier blocks share the same level + text?  (handles duplicates)
+    let skip = blocks[..block_idx].iter().filter(|b| {
+        matches!(b, Block::Heading(l, ils) if *l == *level && inline_text(ils) == target)
+    }).count();
+
+    let mut found    = 0usize;
+    let mut byte_pos = 0usize;
+    for raw_line in buffer.split('\n') {
+        let line = raw_line.trim_end_matches('\r');
+        if line.starts_with(&prefix) && line[prefix.len()..].trim() == target.trim() {
+            if found == skip { return Some(byte_pos); }
+            found += 1;
+        }
+        byte_pos += raw_line.len() + 1; // +1 for the '\n'
+    }
+    None
 }

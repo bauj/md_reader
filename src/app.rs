@@ -494,10 +494,7 @@ impl eframe::App for App {
             }
         }
         if rescan_tree {
-            if let Some(ref root) = self.tree.root {
-                let root_path = root.path.clone();
-                self.tree = FsTree::new(root_path);
-            }
+            self.tree.rescan();
         }
 
         // ── Re-parse active tab when needed ──────────────────────────────

@@ -327,6 +327,24 @@ highlighting.
   - The file watcher and `FsTree` rescan logic are updated to be consistent with
     lazy loading
 
+#### Sidebar Enhancements
+- **Multiple folders:** replace the single `FsTree` with a `Vec<FsTree>` so the user
+  can open several root directories at once in the sidebar.
+  - Each root is shown as a top-level collapsible entry; clicking its header collapses
+    the whole tree.
+  - `Ctrl+O` / "Open Folder" appends a new root instead of replacing the existing one.
+  - Each root has its own file-watcher instance (keep a `Vec<FileWatcher>`).
+- **Close folder:** add a small `×` button next to each root folder label in the
+  sidebar. Clicking it removes that root from the list and stops its watcher.
+  - Keyboard shortcut: none (mouse-only action for now).
+- **View mode restriction for non-`.md` files:** when the active tab's file extension
+  is not `.md`, force the view mode to Preview and hide the Edit / Split toggle buttons
+  in the toolbar. The outline panel is also hidden for non-`.md` files since there are
+  no parsed headings.
+  - Detect via `tab.path.extension() == Some("md")`.
+  - If the user switches away from a non-`.md` tab back to a `.md` tab, restore the
+    previously chosen view mode.
+
 #### UX Polish
 - **Tab key focus navigation in dialogs:** when a modal dialog is open (e.g. "Unsaved
   changes — Save / Discard / Cancel"), pressing `Tab` should cycle focus through the

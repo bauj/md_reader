@@ -17,10 +17,10 @@ pub fn render_markdown(
     let mut occurrence = 0usize;
     for (i, block) in doc.blocks.iter().enumerate() {
         ui.push_id(i, |ui| {
-            render_block(ui, block, hl, search_query, search_current, opts, &mut occurrence);
             if scroll_to == Some(i) {
                 ui.scroll_to_cursor(Some(egui::Align::TOP));
             }
+            render_block(ui, block, hl, search_query, search_current, opts, &mut occurrence);
         });
         ui.add_space(4.0);
     }

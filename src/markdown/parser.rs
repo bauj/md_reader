@@ -24,6 +24,7 @@ pub enum Inline {
     BoldItalic(String),
     Code(String),
     Link(String, String), // text, url
+    Image(String, String), // url, alt text
 }
 
 pub fn parse_markdown(text: &str) -> ParsedDoc {
@@ -216,6 +217,18 @@ pub fn parse_markdown(text: &str) -> ParsedDoc {
                 }
             }
             Event::Rule => { blocks.push(Block::Rule); }
+
+            // Handle images as inline elements
+            Event::Start(Tag::Image { dest_url, .. }) => {
+                link_url = Some(dest_url.to_string()); // reuse link_url to hold image URL
+                link_text.clear(); // alt text will accumulate here
+            }
+            Event::End(TagEnd::Image) => {
+                if let Some(url) = link_url.take() {
+                    let alt_text = std::mem::take(&mut link_text);
+                    current_inlines.push(Inline::Image(url, alt_text));
+                }
+            }
 
             _ => {}
         }

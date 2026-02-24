@@ -81,6 +81,7 @@ pub struct App {
     recent_files: Vec<PathBuf>,
 
     pending_action: Option<PendingAction>,
+    dialog_focused_button: usize, // 0=Save, 1=Discard, 2=Cancel
 
     // Search (Ctrl+F)
     search_open:          bool,
@@ -120,6 +121,7 @@ impl App {
             view_mode:         ViewMode::from_str(&state.view_mode),
             recent_files:      state.recent_files.into_iter().filter(|p| p.is_file()).collect(),
             pending_action:       None,
+            dialog_focused_button: 0,
             search_open:             false,
             search_query:            String::new(),
             search_matches:          Vec::new(),
@@ -483,6 +485,21 @@ impl eframe::App for App {
             }
         }
 
+        // ── Drag-and-drop ──────────────────────────────────────────────────
+        ctx.input(|i| {
+            for file in &i.raw.dropped_files {
+                if let Some(path) = &file.path {
+                    if path.is_file() && path.extension().map_or(false, |e| e == "md") {
+                        // Markdown file: open it
+                        self.open_tab(path.clone());
+                    } else if path.is_dir() {
+                        // Folder: add as root
+                        self.add_root(path.clone());
+                    }
+                }
+            }
+        });
+
         // ── File-watcher events ───────────────────────────────────────────
         let mut rescan_tree = false;
         for (_, watcher) in &self.roots {
@@ -530,6 +547,27 @@ impl eframe::App for App {
         if self.pending_action.is_some() {
             let mut choice: Option<bool> = None;
 
+            // Handle Tab/Shift+Tab to cycle focus, Enter to activate.
+            // Use input_mut + consume_key so egui's own focus system never sees Tab.
+            ctx.memory_mut(|m| m.stop_text_input()); // prevent background widgets from receiving key input
+            let tab_fwd  = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE,  Key::Tab));
+            let tab_back = ctx.input_mut(|i| i.consume_key(egui::Modifiers::SHIFT, Key::Tab));
+            let enter    = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE,  Key::Enter));
+
+            if tab_fwd {
+                self.dialog_focused_button = (self.dialog_focused_button + 1) % 3;
+            }
+            if tab_back {
+                self.dialog_focused_button = if self.dialog_focused_button == 0 { 2 } else { self.dialog_focused_button - 1 };
+            }
+            if enter {
+                match self.dialog_focused_button {
+                    0 => choice = Some(true),       // Save
+                    1 => choice = Some(false),       // Discard
+                    _ => self.pending_action = None, // Cancel
+                }
+            }
+
             egui::Window::new("Unsaved changes")
                 .collapsible(false)
                 .resizable(false)
@@ -556,20 +594,29 @@ impl eframe::App for App {
                     ui.label(msg);
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
-                        if ui.button("💾 Save")
+                        // Save button
+                        let save_text = if self.dialog_focused_button == 0 { "» 💾 Save" } else { "💾 Save" };
+                        if ui.button(save_text)
                             .on_hover_text("Save changes before closing")
                             .clicked() {
                             choice = Some(true);
                         }
-                        if ui.button("🗑 Discard")
+
+                        // Discard button
+                        let discard_text = if self.dialog_focused_button == 1 { "» 🗑 Discard" } else { "🗑 Discard" };
+                        if ui.button(discard_text)
                             .on_hover_text("Discard changes and close anyway")
                             .clicked() {
                             choice = Some(false);
                         }
-                        if ui.button("Cancel")
+
+                        // Cancel button
+                        let cancel_text = if self.dialog_focused_button == 2 { "» Cancel" } else { "Cancel" };
+                        if ui.button(cancel_text)
                             .on_hover_text("Go back and keep the file open")
                             .clicked() {
                             self.pending_action = None;
+                            self.dialog_focused_button = 0;
                         }
                     });
                 });
@@ -595,6 +642,7 @@ impl eframe::App for App {
                     }
                     None => {}
                 }
+                self.dialog_focused_button = 0;
             }
         }
 
@@ -1231,6 +1279,7 @@ fn block_plain_text(block: &crate::markdown::Block) -> String {
             Inline::Text(s) | Inline::Bold(s) | Inline::Italic(s)
             | Inline::BoldItalic(s) | Inline::Code(s) => s.as_str(),
             Inline::Link(t, _) => t.as_str(),
+            Inline::Image(_, alt) => alt.as_str(),
         }).collect::<Vec<_>>().join("")
     }
 
@@ -1303,6 +1352,7 @@ fn heading_byte_offset(buffer: &str, blocks: &[crate::markdown::Block], block_id
             Inline::Text(s) | Inline::Bold(s) | Inline::Italic(s)
             | Inline::BoldItalic(s) | Inline::Code(s) => s.as_str(),
             Inline::Link(t, _) => t.as_str(),
+            Inline::Image(_, alt) => alt.as_str(),
         }).collect()
     }
 

@@ -113,6 +113,7 @@ fn inlines_to_text(inlines: &[Inline]) -> String {
             | Inline::BoldItalic(s)
             | Inline::Code(s) => s.as_str(),
             Inline::Link(text, _) => text.as_str(),
+            Inline::Image(_, alt) => alt.as_str(),
         })
         .collect()
 }

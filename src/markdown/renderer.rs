@@ -310,8 +310,42 @@ fn render_inline(
             *occurrence += match_count;
         }
         Inline::Link(text, url) => {
-            if ui.link(text.as_str()).clicked() {
-                let _ = open::that(url.as_str());
+            let resp = ui.label(
+                RichText::new(text.as_str())
+                    .color(Color32::from_rgb(43, 121, 162))
+                    .underline()
+            ).on_hover_text(format!("Ctrl+Click to open: {}", url));
+
+            if resp.hovered() {
+                let ctrl_held = ui.ctx().input(|i| i.modifiers.ctrl);
+                if ctrl_held {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                }
+            }
+            if resp.clicked() {
+                let ctrl_held = ui.ctx().input(|i| i.modifiers.ctrl);
+                if ctrl_held {
+                    let _ = open::that(url.as_str());
+                }
+            }
+        }
+        Inline::Image(url, alt) => {
+            // Try to load image from file path or URL
+            if let Ok(img_data) = load_image(url) {
+                let texture = ui.ctx().load_texture(
+                    url,
+                    img_data,
+                    Default::default(),
+                );
+                // Constrain image to reasonable dimensions while maintaining aspect ratio
+                ui.image(&texture);
+            } else {
+                // Fallback: show alt text or URL
+                ui.label(
+                    RichText::new(format!("[Image: {}]", if alt.is_empty() { url } else { alt }))
+                        .color(Color32::GRAY)
+                        .italics()
+                );
             }
         }
     }
@@ -416,4 +450,30 @@ fn styled_rt(text: &str, size: f32, bold: bool, italic: bool) -> RichText {
     let rt = if bold   { rt.strong()  } else { rt };
     let rt = if italic { rt.italics() } else { rt };
     rt
+}
+
+/// Load an image from a file path, returning ImageData for egui.
+/// Supports local file paths; URLs are not supported yet.
+fn load_image(path: &str) -> Result<egui::ImageData, String> {
+    use std::path::Path;
+
+    // Try to load as a local file
+    let file_path = Path::new(path);
+    if file_path.is_file() {
+        let img = image::open(file_path)
+            .map_err(|e| format!("Failed to open image: {}", e))?;
+        let rgba = img.to_rgba8();
+        let (w, h) = rgba.dimensions();
+        let pixels = rgba.into_vec();
+        Ok(egui::ImageData::Color(std::sync::Arc::new(
+            egui::ColorImage {
+                size: [w as usize, h as usize],
+                pixels: pixels.chunks_exact(4)
+                    .map(|p| egui::Color32::from_rgba_unmultiplied(p[0], p[1], p[2], p[3]))
+                    .collect(),
+            }
+        )))
+    } else {
+        Err("Image path not found or not a file".to_string())
+    }
 }

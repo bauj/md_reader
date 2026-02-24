@@ -601,6 +601,11 @@ Port of mdBook "Ayu".
 ### Crates introduced
 - None (all egui built-ins + `Color32` constants)
 
+#### Window Title
+- Set the base window title to **"Markdown Reader"** (instead of the default crate name)
+- Format: `"Markdown Reader — <filename> [●]"` when a file is open (existing pattern), with
+  `"Markdown Reader"` alone when no file is open
+
 ### Acceptance criteria
 - All 5 themes apply correctly with no hard-coded colors remaining in renderer or UI code
 - Sidebar, toolbar, tab strip, and central panel each use the theme's appropriate surface color
@@ -609,6 +614,7 @@ Port of mdBook "Ayu".
 - Preview content width is capped at ~700 px and centered
 - Theme selection persists across restarts
 - Switching themes updates the UI immediately without restart
+- Window title shows "Markdown Reader" (with file name and modified indicator when a file is open)
 
 ---
 

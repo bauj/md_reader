@@ -13,138 +13,152 @@ impl ThemeId {
     pub fn name(self) -> &'static str {
         match self {
             ThemeId::Light => "Light",
-            ThemeId::Rust => "Rust",
-            ThemeId::Coal => "Coal",
-            ThemeId::Navy => "Navy",
-            ThemeId::Ayu => "Ayu",
+            ThemeId::Rust  => "Rust",
+            ThemeId::Coal  => "Coal",
+            ThemeId::Navy  => "Navy",
+            ThemeId::Ayu   => "Ayu",
         }
     }
 }
 
 pub struct Theme {
-    pub id: ThemeId,
+    pub id:   ThemeId,
     pub name: &'static str,
 
     // Surfaces
-    pub bg: Color32,              // central panel / preview background
-    pub sidebar_bg: Color32,      // sidebar + outline panel background
-    pub toolbar_bg: Color32,      // top toolbar background
-    pub tab_bar_bg: Color32,      // tab strip background
+    pub bg:          Color32,  // central panel / preview background
+    pub sidebar_bg:  Color32,  // sidebar + outline panel
+    pub toolbar_bg:  Color32,  // top toolbar + status bar
+    pub tab_bar_bg:  Color32,  // tab strip
 
     // Text
-    pub fg: Color32,              // body text
-    pub fg_muted: Color32,        // muted / secondary text
-    pub sidebar_fg: Color32,      // sidebar file/folder labels
-    pub sidebar_active: Color32,  // currently open file highlight
+    pub fg:             Color32,  // body text
+    pub fg_muted:       Color32,  // secondary / placeholder text
+    pub sidebar_fg:     Color32,  // sidebar labels
+    pub sidebar_active: Color32,  // active item accent
 
     // Interactive
-    pub link: Color32,            // hyperlinks
-    pub selection_bg: Color32,    // text selection background
+    pub link:         Color32,  // hyperlinks
+    pub selection_bg: Color32,  // text selection
 
-    // Code blocks
-    pub code_bg: Color32,         // fenced code block frame background
-    pub inline_code_fg: Color32,  // `inline code` text color
+    // Code
+    pub code_bg:        Color32,  // code block frame
+    pub inline_code_fg: Color32,  // `inline code` text
 
-    // Structural
-    pub separator: Color32,       // dividers, rule (---) lines
-    pub quote_bg: Color32,        // blockquote left-bar tint
+    // Structure
+    pub separator: Color32,  // hr, dividers
+    pub quote_bg:  Color32,  // blockquote tint
 }
 
 pub const THEMES: &[Theme] = &[
-    // Light — clean white, high contrast (WCAG AA)
+    // ── Light — "Manuscript" ─────────────────────────────────────────────────
+    // Warm cream paper. The writing desk at golden hour.
+    // Sapphire accent pops against the warm neutrals without jarring.
     Theme {
-        id: ThemeId::Light,
+        id:   ThemeId::Light,
         name: "Light",
-        bg: Color32::from_rgb(255, 255, 255),
-        sidebar_bg: Color32::from_rgb(248, 248, 248),
-        toolbar_bg: Color32::from_rgb(242, 242, 242),
-        tab_bar_bg: Color32::from_rgb(235, 235, 235),
-        fg: Color32::from_rgb(25, 25, 25),          // Darker for better contrast
-        fg_muted: Color32::from_rgb(75, 75, 75),   // Darker muted
-        sidebar_fg: Color32::from_rgb(25, 25, 25), // Darker
-        sidebar_active: Color32::from_rgb(0, 100, 200), // Deeper blue
-        link: Color32::from_rgb(0, 100, 200),
-        selection_bg: Color32::from_rgb(150, 200, 255),
-        code_bg: Color32::from_rgb(242, 244, 247),
-        inline_code_fg: Color32::from_rgb(180, 20, 100),
-        separator: Color32::from_rgb(200, 200, 200),
-        quote_bg: Color32::from_rgb(240, 248, 255),
+        bg:          Color32::from_rgb(252, 249, 243), // warm cream, not sterile white
+        sidebar_bg:  Color32::from_rgb(241, 237, 228), // a notch darker, same warmth
+        toolbar_bg:  Color32::from_rgb(232, 228, 218), // toolbar sits visually below sidebar
+        tab_bar_bg:  Color32::from_rgb(222, 217, 206), // distinct strip
+        fg:          Color32::from_rgb(30, 27, 22),    // warm near-black ink
+        fg_muted:    Color32::from_rgb(110, 104, 92),  // warm mid-tone
+        sidebar_fg:  Color32::from_rgb(45, 42, 36),
+        sidebar_active: Color32::from_rgb(12, 88, 188), // deep sapphire
+        link:           Color32::from_rgb(12, 88, 188),
+        selection_bg:   Color32::from_rgb(185, 215, 255),
+        code_bg:        Color32::from_rgb(230, 226, 216),
+        inline_code_fg: Color32::from_rgb(172, 20, 92), // distinctive crimson
+        separator:      Color32::from_rgb(200, 195, 184),
+        quote_bg:       Color32::from_rgb(230, 226, 216),
     },
-    // Rust — warm parchment (WCAG AA)
+
+    // ── Rust — "Forge" ───────────────────────────────────────────────────────
+    // Charred wood sidebar, amber parchment content.
+    // The feeling of a blacksmith's workshop in late afternoon light.
     Theme {
-        id: ThemeId::Rust,
+        id:   ThemeId::Rust,
         name: "Rust",
-        bg: Color32::from_rgb(233, 230, 220),
-        sidebar_bg: Color32::from_rgb(70, 55, 48),
-        toolbar_bg: Color32::from_rgb(80, 65, 55),
-        tab_bar_bg: Color32::from_rgb(60, 48, 40),
-        fg: Color32::from_rgb(20, 20, 20),         // Much darker for contrast
-        fg_muted: Color32::from_rgb(80, 75, 65),  // Darker muted
-        sidebar_fg: Color32::from_rgb(240, 240, 230), // Much lighter for dark bg
-        sidebar_active: Color32::from_rgb(255, 180, 100),
-        link: Color32::from_rgb(30, 110, 160),
-        selection_bg: Color32::from_rgb(200, 160, 110),
-        code_bg: Color32::from_rgb(220, 215, 205),
-        inline_code_fg: Color32::from_rgb(130, 50, 80),
-        separator: Color32::from_rgb(180, 170, 160),
-        quote_bg: Color32::from_rgb(230, 225, 215),
+        bg:          Color32::from_rgb(244, 238, 220), // warm amber parchment
+        sidebar_bg:  Color32::from_rgb(50, 29, 14),    // charred deep brown
+        toolbar_bg:  Color32::from_rgb(62, 38, 20),    // slightly lighter toolbar
+        tab_bar_bg:  Color32::from_rgb(38, 22, 10),    // near-black brown strip
+        fg:          Color32::from_rgb(40, 30, 12),    // dark warm ink
+        fg_muted:    Color32::from_rgb(105, 82, 56),   // warm tan-gray
+        sidebar_fg:  Color32::from_rgb(238, 210, 165), // warm golden cream
+        sidebar_active: Color32::from_rgb(225, 128, 30), // cooling ember orange
+        link:           Color32::from_rgb(165, 58, 10),  // rusty red
+        selection_bg:   Color32::from_rgb(200, 148, 72),
+        code_bg:        Color32::from_rgb(226, 215, 192),
+        inline_code_fg: Color32::from_rgb(150, 28, 55),  // warm crimson
+        separator:      Color32::from_rgb(188, 165, 132),
+        quote_bg:       Color32::from_rgb(226, 215, 192),
     },
-    // Coal — near-black dark mode (WCAG AA)
+
+    // ── Coal — "Graphite" ────────────────────────────────────────────────────
+    // Refined warm charcoal. Not the cold blue-gray that plagues dark modes.
+    // Like artist charcoal on smooth black paper.
     Theme {
-        id: ThemeId::Coal,
+        id:   ThemeId::Coal,
         name: "Coal",
-        bg: Color32::from_rgb(25, 27, 30),
-        sidebar_bg: Color32::from_rgb(50, 54, 60),
-        toolbar_bg: Color32::from_rgb(40, 44, 50),
-        tab_bar_bg: Color32::from_rgb(35, 39, 45),
-        fg: Color32::from_rgb(230, 235, 240),     // Much lighter for dark bg
-        fg_muted: Color32::from_rgb(180, 185, 190),
-        sidebar_fg: Color32::from_rgb(220, 225, 230),
-        sidebar_active: Color32::from_rgb(100, 180, 255),
-        link: Color32::from_rgb(100, 180, 255),
-        selection_bg: Color32::from_rgb(70, 110, 150),
-        code_bg: Color32::from_rgb(40, 44, 50),
-        inline_code_fg: Color32::from_rgb(220, 230, 240),
-        separator: Color32::from_rgb(80, 90, 100),
-        quote_bg: Color32::from_rgb(45, 50, 60),
+        bg:          Color32::from_rgb(18, 18, 20),   // near-black with warmth
+        sidebar_bg:  Color32::from_rgb(26, 26, 29),   // subtle lift for sidebar
+        toolbar_bg:  Color32::from_rgb(22, 22, 24),   // between bg and sidebar
+        tab_bar_bg:  Color32::from_rgb(13, 13, 15),   // darkest surface
+        fg:          Color32::from_rgb(240, 236, 228), // warm off-white
+        fg_muted:    Color32::from_rgb(130, 124, 114), // warm mid-gray
+        sidebar_fg:  Color32::from_rgb(212, 208, 200),
+        sidebar_active: Color32::from_rgb(70, 165, 255), // sharp electric blue
+        link:           Color32::from_rgb(70, 165, 255),
+        selection_bg:   Color32::from_rgb(36, 82, 132),
+        code_bg:        Color32::from_rgb(23, 23, 26),
+        inline_code_fg: Color32::from_rgb(232, 168, 58), // warm amber on dark
+        separator:      Color32::from_rgb(38, 38, 44),
+        quote_bg:       Color32::from_rgb(23, 23, 26),
     },
-    // Navy — blue-tinted dark mode (WCAG AA)
+
+    // ── Navy — "Midnight Deep" ───────────────────────────────────────────────
+    // Rich saturated ocean. Not washed-out steel blue — committed deep navy.
+    // Bright cyan cuts through like bioluminescence.
     Theme {
-        id: ThemeId::Navy,
+        id:   ThemeId::Navy,
         name: "Navy",
-        bg: Color32::from_rgb(30, 38, 60),
-        sidebar_bg: Color32::from_rgb(50, 60, 85),
-        toolbar_bg: Color32::from_rgb(40, 50, 75),
-        tab_bar_bg: Color32::from_rgb(35, 45, 70),
-        fg: Color32::from_rgb(230, 235, 245),     // Much lighter
-        fg_muted: Color32::from_rgb(180, 190, 210),
-        sidebar_fg: Color32::from_rgb(220, 230, 245),
-        sidebar_active: Color32::from_rgb(120, 200, 255),
-        link: Color32::from_rgb(120, 200, 255),
-        selection_bg: Color32::from_rgb(70, 120, 180),
-        code_bg: Color32::from_rgb(40, 50, 75),
-        inline_code_fg: Color32::from_rgb(220, 240, 255),
-        separator: Color32::from_rgb(80, 100, 130),
-        quote_bg: Color32::from_rgb(50, 65, 95),
+        bg:          Color32::from_rgb(18, 30, 58),    // saturated deep navy
+        sidebar_bg:  Color32::from_rgb(10, 18, 38),    // darker abyss
+        toolbar_bg:  Color32::from_rgb(13, 23, 45),    // between
+        tab_bar_bg:  Color32::from_rgb(7, 13, 28),     // near-black navy
+        fg:          Color32::from_rgb(215, 232, 255),  // light blue-tinted white
+        fg_muted:    Color32::from_rgb(108, 142, 195),  // desaturated mid blue
+        sidebar_fg:  Color32::from_rgb(186, 214, 252),
+        sidebar_active: Color32::from_rgb(50, 198, 255), // bioluminescent cyan
+        link:           Color32::from_rgb(50, 198, 255),
+        selection_bg:   Color32::from_rgb(26, 66, 122),
+        code_bg:        Color32::from_rgb(11, 20, 42),
+        inline_code_fg: Color32::from_rgb(144, 214, 255), // softer cyan
+        separator:      Color32::from_rgb(30, 46, 82),
+        quote_bg:       Color32::from_rgb(13, 23, 48),
     },
-    // Ayu — minimal dark with warm accent (WCAG AA)
+
+    // ── Ayu — "Ember" ────────────────────────────────────────────────────────
+    // Near-void darkness with golden amber warmth. Staring into dying embers.
+    // The contrast between cold darkness and warm fire is the whole point.
     Theme {
-        id: ThemeId::Ayu,
+        id:   ThemeId::Ayu,
         name: "Ayu",
-        bg: Color32::from_rgb(20, 27, 35),
-        sidebar_bg: Color32::from_rgb(30, 40, 50),
-        toolbar_bg: Color32::from_rgb(25, 35, 45),
-        tab_bar_bg: Color32::from_rgb(20, 30, 40),
-        fg: Color32::from_rgb(225, 225, 225),     // Much lighter
-        fg_muted: Color32::from_rgb(160, 170, 180),
-        sidebar_fg: Color32::from_rgb(220, 230, 240),
-        sidebar_active: Color32::from_rgb(255, 200, 100),
-        link: Color32::from_rgb(0, 170, 230),
-        selection_bg: Color32::from_rgb(60, 90, 130),
-        code_bg: Color32::from_rgb(30, 40, 50),
-        inline_code_fg: Color32::from_rgb(255, 200, 100),
-        separator: Color32::from_rgb(50, 70, 90),
-        quote_bg: Color32::from_rgb(35, 48, 65),
+        bg:          Color32::from_rgb(10, 14, 20),    // deep void, slight blue-dark
+        sidebar_bg:  Color32::from_rgb(15, 20, 29),    // subtle rise
+        toolbar_bg:  Color32::from_rgb(11, 16, 23),    // between
+        tab_bar_bg:  Color32::from_rgb(7, 10, 14),     // near-black
+        fg:          Color32::from_rgb(196, 192, 184),  // warm star-white
+        fg_muted:    Color32::from_rgb(78, 88, 106),    // cool-dark mid
+        sidebar_fg:  Color32::from_rgb(165, 170, 186),
+        sidebar_active: Color32::from_rgb(255, 152, 26), // golden fire amber
+        link:           Color32::from_rgb(46, 180, 222),  // cold cyan (contrast)
+        selection_bg:   Color32::from_rgb(26, 43, 68),
+        code_bg:        Color32::from_rgb(13, 18, 25),
+        inline_code_fg: Color32::from_rgb(255, 152, 26),  // amber matches accent
+        separator:      Color32::from_rgb(20, 28, 42),
+        quote_bg:       Color32::from_rgb(13, 18, 25),
     },
 ];
 

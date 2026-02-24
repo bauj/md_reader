@@ -1,5 +1,5 @@
 use std::collections::HashSet;
-use egui::{Color32, RichText, Ui};
+use egui::{RichText, Ui};
 use crate::markdown::{Block, Inline, ParsedDoc};
 
 /// Renders the document outline panel (H1/H2/H3 headings).
@@ -39,7 +39,7 @@ pub fn render_outline(
         .collect();
 
     if headings.is_empty() {
-        ui.label(RichText::new("No headings").color(Color32::GRAY).size(12.0));
+        ui.label(RichText::new("No headings").color(ui.visuals().weak_text_color()).size(12.0));
         return None;
     }
 
@@ -90,7 +90,7 @@ pub fn render_outline(
             let text = match level {
                 1 => RichText::new(title.as_str()).strong().size(13.0),
                 2 => RichText::new(title.as_str()).size(12.0),
-                _ => RichText::new(title.as_str()).size(12.0).color(Color32::GRAY),
+                _ => RichText::new(title.as_str()).size(12.0).color(ui.visuals().weak_text_color()),
             };
             if ui.selectable_label(false, text)
                 .on_hover_text(title.as_str())

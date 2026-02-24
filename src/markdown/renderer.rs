@@ -22,7 +22,8 @@ pub fn render_markdown(
             }
             render_block(ui, block, hl, search_query, search_current, opts, &mut occurrence);
         });
-        ui.add_space(4.0);
+        // Increased vertical spacing between blocks for better readability
+        ui.add_space(12.0);
     }
 }
 
@@ -38,10 +39,10 @@ fn render_block(
     match block {
         Block::Heading(level, inlines) => {
             let size = match level {
-                1 => 28.0,  // H1
-                2 => 22.0,  // H2
-                3 => 18.0,  // H3
-                4 => 16.0,  // H4 (body size)
+                1 => 32.0,  // H1
+                2 => 24.0,  // H2
+                3 => 20.0,  // H3
+                4 => 18.0,  // H4
                 5 => 16.0,  // H5
                 _ => 14.0,  // H6+
             };
@@ -57,6 +58,7 @@ fn render_block(
 
         Block::Paragraph(inlines) => {
             ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing.y = 18.0; // Increased line height within paragraphs
                 for inline in inlines {
                     render_inline(ui, inline, None, false, search_query, search_current, opts, occurrence);
                 }
@@ -92,7 +94,7 @@ fn render_block(
 
                         if rel_s > local {
                             job.append(&text[local..rel_s], 0.0, TextFormat {
-                                font_id: FontId::monospace(13.0),
+                                font_id: FontId::monospace(14.0), // Slightly larger font
                                 color:   *color,
                                 ..Default::default()
                             });
@@ -103,7 +105,7 @@ fn render_block(
                             Color32::from_rgb(255, 220, 50)
                         };
                         job.append(&text[rel_s..rel_e], 0.0, TextFormat {
-                            font_id:    FontId::monospace(13.0),
+                            font_id:    FontId::monospace(14.0), // Slightly larger font
                             color:      Color32::BLACK,
                             background: bg,
                             ..Default::default()
@@ -113,7 +115,7 @@ fn render_block(
 
                     if local < text.len() {
                         job.append(&text[local..], 0.0, TextFormat {
-                            font_id: FontId::monospace(13.0),
+                            font_id: FontId::monospace(14.0), // Slightly larger font
                             color:   *color,
                             ..Default::default()
                         });
@@ -123,38 +125,74 @@ fn render_block(
             }
             *occurrence += code_matches.len();
 
+            // Use a slightly darker background for better contrast
+            let code_bg = if light_bg {
+                Color32::from_rgb(240, 240, 240) // Lighter than faint_bg_color for light themes
+            } else {
+                Color32::from_rgb(40, 40, 40) // Darker than faint_bg_color for dark themes
+            };
+
             Frame::canvas(&ui.style())
-                .fill(ui.visuals().faint_bg_color)
-                .inner_margin(egui::Margin::symmetric(10, 8))
-                .corner_radius(4.0)
+                .fill(code_bg)
+                .inner_margin(egui::Margin::symmetric(12, 10))
+                .corner_radius(6.0)
                 .show(ui, |ui| {
                     ui.set_width(ui.available_width());
-                    if !lang.is_empty() {
-                        ui.label(
-                            RichText::new(lang.as_str())
-                                .size(10.0)
-                                .color(Color32::from_gray(140)),
-                        );
-                        ui.add_space(2.0);
-                    }
-                    ui.label(job);
+                    
+                    // Header with language and copy button
+                    ui.horizontal(|ui| {
+                        ui.vertical_centered(|ui| {
+                            if !lang.is_empty() {
+                                ui.label(
+                                    RichText::new(lang.as_str())
+                                        .size(12.0)
+                                        .color(Color32::from_gray(140))
+                                        .strong(),
+                                );
+                            }
+                        });
+                        
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.button("Copy").on_hover_text("Copy to clipboard").clicked() {
+                                ui.ctx().copy_text(code.to_string());
+                            }
+                        });
+                    });
+                    
+                    ui.add_space(4.0);
+                    ui.separator();
+                    ui.add_space(4.0);
+                    
+                    // Display the code with monospace font, left-aligned
+                    ui.with_layout(egui::Layout::left_to_right(egui::Align::Min), |ui| {
+                        ui.label(job);
+                    });
                 });
         }
 
         Block::BlockQuote(inlines) => {
             ui.horizontal(|ui| {
+                // Thicker left border with theme color
+                let border_width = 4.0;
+                let border_color = ui.visuals().widgets.active.bg_fill;
                 let (rect, _) = ui.allocate_exact_size(
-                    egui::vec2(3.0, ui.spacing().interact_size.y.max(16.0)),
+                    egui::vec2(border_width, ui.spacing().interact_size.y.max(24.0)),
                     egui::Sense::hover(),
                 );
-                // Use a muted text color for the quote bar (works across themes)
-                ui.painter().rect_filled(rect, 2.0, ui.visuals().weak_text_color());
-                ui.add_space(6.0);
+                ui.painter().rect_filled(rect, border_width, border_color);
+                
+                ui.add_space(12.0); // Increased spacing between border and text
+                
                 ui.vertical(|ui| {
                     ui.horizontal_wrapped(|ui| {
+                        ui.spacing_mut().item_spacing.y = 18.0; // Better line height
+                        // Italicize blockquote text by using a muted color
+                        let original_fg = ui.visuals().text_color();
+                        ui.visuals_mut().override_text_color = Some(ui.visuals().weak_text_color());
                         for inline in inlines {
                             render_inline(ui, inline, None, false, search_query, search_current, opts, occurrence);
                         }
+                        ui.visuals_mut().override_text_color = Some(original_fg);
                     });
                 });
             });
@@ -162,18 +200,31 @@ fn render_block(
 
         Block::List(ordered, items) => {
             for (i, item_inlines) in items.iter().enumerate() {
-                ui.horizontal_wrapped(|ui| {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.y = 16.0; // Better line height for list items
+                    
+                    // Add left margin for nested lists
+                    ui.add_space(20.0); // Base indentation
+                    
                     let bullet = if *ordered {
-                        format!("{}.", i + 1)
+                        format!("{}. ", i + 1)
                     } else {
-                        "•".to_string()
+                        "• ".to_string()
                     };
-                    ui.label(RichText::new(bullet).size(14.0));
-                    ui.add_space(4.0);
+                    
+                    // Use a muted color for bullets
+                    ui.label(RichText::new(bullet)
+                        .size(16.0)
+                        .color(ui.visuals().weak_text_color())
+                    );
+                    
+                    ui.add_space(12.0); // Increased spacing between bullet and text
+                    
                     for inline in item_inlines {
                         render_inline(ui, inline, None, false, search_query, search_current, opts, occurrence);
                     }
                 });
+                ui.add_space(4.0); // Space between list items
             }
         }
 
@@ -185,19 +236,32 @@ fn render_block(
             // multiple &mut borrows to the same variable.
             let occ = std::cell::Cell::new(*occurrence);
 
+            // Simple table styling without zebra striping
+            let header_bg = ui.visuals().widgets.active.bg_fill;
+
             Frame::canvas(&ui.style())
                 .fill(ui.visuals().faint_bg_color)
-                .corner_radius(4.0)
+                .corner_radius(6.0)
+                .stroke(ui.visuals().widgets.noninteractive.bg_stroke)
                 .show(ui, |ui| {
                     ui.set_width(ui.available_width());
 
                     TableBuilder::new(ui)
-                        .striped(true)
+                        .striped(false) // Disable zebra striping
                         .columns(Column::remainder().resizable(true), col_count)
-                        .header(24.0, |mut row| {
+                        .header(28.0, |mut row| {
                             for header_inlines in headers {
                                 row.col(|ui| {
-                                    ui.horizontal_wrapped(|ui| {
+                                    // Fill the full cell rect as the header background
+                                    ui.painter().rect_filled(ui.max_rect(), 0.0, header_bg);
+                                    // Vertical centering: push content down by half the slack
+                                    let text_h = ui.text_style_height(&egui::TextStyle::Body);
+                                    let vpad = ((ui.available_height() - text_h) / 2.0).max(2.0);
+                                    ui.add_space(vpad);
+                                    // Horizontal centering via top-down centered layout
+                                    ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+                                        ui.set_width(ui.available_width());
+                                        ui.spacing_mut().item_spacing.y = 0.0;
                                         let mut o = occ.get();
                                         for il in header_inlines {
                                             render_inline(ui, il, None, true, search_query, search_current, opts, &mut o);
@@ -209,10 +273,12 @@ fn render_block(
                         })
                         .body(|mut body| {
                             for data_row in rows {
-                                body.row(20.0, |mut row| {
+                                body.row(24.0, |mut row| {
                                     for cell_inlines in data_row.iter() {
                                         row.col(|ui| {
+                                            // Simple cell without alternating background
                                             ui.horizontal_wrapped(|ui| {
+                                                ui.spacing_mut().item_spacing.y = 16.0;
                                                 let mut o = occ.get();
                                                 for il in cell_inlines {
                                                     render_inline(ui, il, None, false, search_query, search_current, opts, &mut o);
@@ -314,24 +380,49 @@ fn render_inline(
             *occurrence += match_count;
         }
         Inline::Link(text, url) => {
-            let resp = ui.label(
-                RichText::new(text.as_str())
-                    .color(Color32::from_rgb(43, 121, 162))
-                    .underline()
-            ).on_hover_text(format!("Ctrl+Click to open: {}", url));
+            // Check if URL is external (starts with http:// or https://)
+            let is_external = url.starts_with("http://") || url.starts_with("https://");
+            
+            ui.horizontal(|ui| {
+                let resp = ui.label(
+                    RichText::new(text.as_str())
+                        .color(Color32::from_rgb(43, 121, 162))
+                ).on_hover_text(if is_external {
+                    format!("Ctrl+Click to open external link: {}", url)
+                } else {
+                    format!("Ctrl+Click to open: {}", url)
+                });
 
-            if resp.hovered() {
-                let ctrl_held = ui.ctx().input(|i| i.modifiers.ctrl);
-                if ctrl_held {
-                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                // Add external link indicator for external URLs
+                if is_external {
+                    ui.add_space(4.0);
+                    ui.label(
+                        RichText::new("[external]")
+                            .color(Color32::from_rgb(43, 121, 162))
+                            .size(10.0)
+                            .italics()
+                    );
                 }
-            }
-            if resp.clicked() {
-                let ctrl_held = ui.ctx().input(|i| i.modifiers.ctrl);
-                if ctrl_held {
-                    let _ = open::that(url.as_str());
+
+                if resp.hovered() {
+                    // Underline on hover
+                    ui.painter().line_segment(
+                        [resp.rect.left_bottom(), resp.rect.right_bottom()],
+                        egui::Stroke::new(1.0, Color32::from_rgb(43, 121, 162))
+                    );
+                    
+                    let ctrl_held = ui.ctx().input(|i| i.modifiers.ctrl);
+                    if ctrl_held {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                    }
                 }
-            }
+                if resp.clicked() {
+                    let ctrl_held = ui.ctx().input(|i| i.modifiers.ctrl);
+                    if ctrl_held {
+                        let _ = open::that(url.as_str());
+                    }
+                }
+            });
         }
         Inline::Image(url, alt) => {
             // Try to load image from file path or URL

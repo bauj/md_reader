@@ -620,7 +620,7 @@ impl eframe::App for App {
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
                         // Save button
-                        let save_text = if self.dialog_focused_button == 0 { "» 💾 Save" } else { "💾 Save" };
+                        let save_text = if self.dialog_focused_button == 0 { "» Save" } else { "Save" };
                         if ui.button(save_text)
                             .on_hover_text("Save changes before closing")
                             .clicked() {
@@ -628,7 +628,7 @@ impl eframe::App for App {
                         }
 
                         // Discard button
-                        let discard_text = if self.dialog_focused_button == 1 { "» 🗑 Discard" } else { "🗑 Discard" };
+                        let discard_text = if self.dialog_focused_button == 1 { "» Discard" } else { "Discard" };
                         if ui.button(discard_text)
                             .on_hover_text("Discard changes and close anyway")
                             .clicked() {
@@ -689,7 +689,7 @@ impl eframe::App for App {
                 .inner_margin(egui::Margin::symmetric(8, 4)))
             .show(ctx, |ui| {
             ui.horizontal(|ui| {
-                if ui.button("📁 Open Folder").on_hover_text("Open a folder in the sidebar").clicked() {
+                if ui.button("Open Folder").on_hover_text("Open a folder in the sidebar").clicked() {
                     if let Some(path) = rfd::FileDialog::new().pick_folder() {
                         self.add_root(path);
                     }
@@ -699,7 +699,7 @@ impl eframe::App for App {
                 let mut open_path: Option<PathBuf> = None;
                 let mut clear     = false;
 
-                ui.menu_button("🕐 Recent", |ui| {
+                ui.menu_button("Recent", |ui| {
                     if self.recent_files.is_empty() {
                         ui.label(
                             egui::RichText::new("No recent files")
@@ -721,7 +721,7 @@ impl eframe::App for App {
                                     }
                                 }
                                 ui.separator();
-                                if ui.button("🗑 Clear recent files")
+                                if ui.button("Clear history")
                                     .on_hover_text("Clear all recently opened files")
                                     .clicked() {
                                     clear = true;
@@ -740,19 +740,19 @@ impl eframe::App for App {
 
                 ui.separator();
 
-                ui.selectable_value(&mut self.view_mode, ViewMode::Preview, "◆ Preview")
+                ui.selectable_value(&mut self.view_mode, ViewMode::Preview, "Preview")
                     .on_hover_text("Preview markdown rendering");
                 if active_is_md {
-                    ui.selectable_value(&mut self.view_mode, ViewMode::Edit,  "▦ Edit")
+                    ui.selectable_value(&mut self.view_mode, ViewMode::Edit,  "Edit")
                         .on_hover_text("Edit raw markdown");
-                    ui.selectable_value(&mut self.view_mode, ViewMode::Split, "▣ Split")
+                    ui.selectable_value(&mut self.view_mode, ViewMode::Split, "Split")
                         .on_hover_text("View editor and preview side-by-side");
                 }
 
                 ui.separator();
 
                 // Theme picker
-                ui.menu_button("◐ Theme", |ui| {
+                ui.menu_button("Theme", |ui| {
                     for theme in crate::theme::THEMES {
                         if ui.selectable_label(self.active_theme == theme.id, theme.name).clicked() {
                             self.active_theme = theme.id;
@@ -769,12 +769,12 @@ impl eframe::App for App {
                         .map_or(false, |t| t.modified);
                     let has_active = self.active_tab.is_some();
 
-                    if ui.add_enabled(is_modified, egui::Button::new("▤ Save"))
+                    if ui.add_enabled(is_modified, egui::Button::new("Save"))
                         .on_hover_text("Save current file (Ctrl+S)")
                         .clicked() {
                         self.save_active();
                     }
-                    if ui.add_enabled(has_active, egui::Button::new("⊗ Close"))
+                    if ui.add_enabled(has_active, egui::Button::new("Close"))
                         .on_hover_text("Close current file (Ctrl+W)")
                         .clicked() {
                         if let Some(idx) = self.active_tab {
@@ -810,7 +810,7 @@ impl eframe::App for App {
                             .map(|n| n.to_string_lossy().to_string())
                             .unwrap_or_else(|| "?".to_string());
                         let label = if tab.modified {
-                            format!(" {name} ● ")
+                            format!(" {name} * ")
                         } else {
                             format!(" {name} ")
                         };
@@ -824,7 +824,7 @@ impl eframe::App for App {
                             activate_idx = Some(i);
                         }
 
-                        if ui.small_button("⊗")
+                        if ui.small_button("×")
                             .on_hover_text("Close this file (Ctrl+W)")
                             .clicked() {
                             close_idx = Some(i);
@@ -868,7 +868,7 @@ impl eframe::App for App {
             TopBottomPanel::top("extern_mod_banner").show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(
-                        egui::RichText::new("⚠ File changed on disk")
+                        egui::RichText::new("File changed on disk")
                             .color(egui::Color32::from_rgb(220, 160, 0))
                             .strong(),
                     );
@@ -903,6 +903,10 @@ impl eframe::App for App {
                 .fill(theme.sidebar_bg)
                 .inner_margin(egui::Margin::same(8)))
             .show(ctx, |ui| {
+                // Override text color for the sidebar — the global override uses
+                // theme.fg (dark ink) which is invisible on dark-sidebar themes like Rust.
+                ui.visuals_mut().override_text_color = Some(theme.sidebar_fg);
+
                 ScrollArea::vertical()
                     .auto_shrink([false; 2])
                     .show(ui, |ui| {
@@ -912,11 +916,11 @@ impl eframe::App for App {
                         if self.roots.is_empty() {
                             ui.label(
                                 egui::RichText::new("No folder open")
-                                    .color(egui::Color32::GRAY),
+                                    .color(ui.visuals().weak_text_color()),
                             );
                             ui.label(
                                 egui::RichText::new("Use 📁 Open Folder or Ctrl+O")
-                                    .color(egui::Color32::GRAY)
+                                    .color(ui.visuals().weak_text_color())
                                     .size(11.0),
                             );
                         }
@@ -929,11 +933,11 @@ impl eframe::App for App {
                             // Root header: folder name + close button
                             ui.horizontal(|ui| {
                                 ui.label(
-                                    egui::RichText::new(format!("📂 {root_name}"))
+                                    egui::RichText::new(format!("{root_name}"))
                                         .strong()
                                 );
                                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                    if ui.small_button("✕")
+                                    if ui.small_button("×")
                                         .on_hover_text("Close folder")
                                         .clicked()
                                     {
@@ -943,7 +947,7 @@ impl eframe::App for App {
                             });
                             ui.separator();
 
-                            if let Some(path) = render_sidebar(ui, &mut self.roots[i].0) {
+                            if let Some(path) = render_sidebar(ui, &mut self.roots[i].0, theme.sidebar_active) {
                                 open_path = Some(path);
                             }
                             ui.add_space(4.0);
@@ -1153,7 +1157,7 @@ impl eframe::App for App {
                             }
 
                             // Close button
-                            if ui.button("✕").clicked() { close = true; }
+                            if ui.button("×").clicked() { close = true; }
                         });
                     });
                 });
@@ -1194,18 +1198,29 @@ fn render_preview(
 ) {
     ScrollArea::vertical()
         .id_salt(id)
-        .auto_shrink([false; 2])
+        .auto_shrink([false, false])
         .show(ui, |ui| {
-            if let Some(doc) = doc {
-                crate::markdown::render_markdown(ui, doc, scroll_to, hl, search_query, search_current, opts);
-            } else if !buffer.is_empty() {
-                ui.label("Failed to parse markdown.");
-            } else {
-                ui.vertical_centered(|ui| {
-                    ui.add_space(40.0);
-                    ui.label(egui::RichText::new("No file open").color(egui::Color32::GRAY));
+            let avail = ui.available_width();
+            let max_w = 820.0f32.min(avail);
+            let h_pad = ((avail - max_w) / 2.0).max(24.0);
+
+            egui::Frame::new()
+                .inner_margin(egui::Margin {
+                    left:   h_pad as i8,
+                    right:  h_pad as i8,
+                    top:    24,
+                    bottom: 32,
+                })
+                .show(ui, |ui| {
+                    if let Some(doc) = doc {
+                        crate::markdown::render_markdown(
+                            ui, doc, scroll_to, hl,
+                            search_query, search_current, opts,
+                        );
+                    } else if !buffer.is_empty() {
+                        ui.label("Failed to parse markdown.");
+                    }
                 });
-            }
         });
 }
 
@@ -1462,65 +1477,113 @@ fn is_markdown(path: &std::path::Path) -> bool {
 /// Apply the active theme to egui's visuals.
 fn apply_theme(ctx: &egui::Context, theme_id: ThemeId) {
     let theme = crate::theme::theme_by_id(theme_id);
-    let is_dark = matches!(theme_id, ThemeId::Rust | ThemeId::Coal | ThemeId::Navy | ThemeId::Ayu);
 
-    let mut visuals = if is_dark {
+    // Base visuals on content-area luminance — not theme name.
+    // Rust has a light parchment content area, so it gets light() as base even
+    // though its sidebar/toolbar are dark.
+    let is_dark_content = luma(theme.bg) < 128.0;
+    let mut visuals = if is_dark_content {
         egui::Visuals::dark()
     } else {
         egui::Visuals::light()
     };
 
-    // Apply theme colors
-    visuals.panel_fill = theme.bg;
-    visuals.window_fill = theme.bg;
+    // ── Surface fills ─────────────────────────────────────────────────────────
+    visuals.panel_fill          = theme.bg;
+    visuals.window_fill         = theme.bg;
     visuals.override_text_color = Some(theme.fg);
-    visuals.hyperlink_color = theme.link;
-    visuals.selection.bg_fill = theme.selection_bg;
-    visuals.faint_bg_color = theme.code_bg;
+    visuals.hyperlink_color     = theme.link;
+    visuals.selection.bg_fill   = theme.selection_bg;
+    visuals.faint_bg_color      = theme.code_bg;
 
-    // Button backgrounds — derived from toolbar_bg so they blend in but stay visible.
-    // For dark toolbars we lighten, for light toolbars we darken.
-    let lighten = |c: egui::Color32, d: i32| egui::Color32::from_rgb(
-        (c.r() as i32 + d).clamp(0, 255) as u8,
-        (c.g() as i32 + d).clamp(0, 255) as u8,
-        (c.b() as i32 + d).clamp(0, 255) as u8,
-    );
-    let delta = if is_dark { 25 } else { -20 };
-    let btn_normal  = lighten(theme.toolbar_bg, delta);
-    let btn_hovered = lighten(theme.toolbar_bg, delta + 20);
-    let btn_active  = lighten(theme.toolbar_bg, delta + 10);
-    let btn_text    = if is_dark { theme.sidebar_fg } else { theme.fg };
-    let stroke_w    = 1.0f32;
+    // Separator lines use the theme separator color
+    visuals.widgets.noninteractive.bg_stroke =
+        egui::Stroke::new(1.0, theme.separator);
 
-    visuals.widgets.noninteractive.bg_fill        = theme.sidebar_bg;
-    visuals.widgets.noninteractive.weak_bg_fill   = theme.sidebar_bg;
-    visuals.widgets.noninteractive.fg_stroke      = egui::Stroke::new(stroke_w, btn_text);
+    // ── Button backgrounds ────────────────────────────────────────────────────
+    // Derived from toolbar_bg using perceived luminance.
+    let is_dark_toolbar = luma(theme.toolbar_bg) < 128.0;
+    let delta: i32 = if is_dark_toolbar { 28 } else { -22 };
+    let btn_normal  = shift(theme.toolbar_bg, delta);
+    let btn_hovered = shift(theme.toolbar_bg, delta + 22);
+    let btn_active  = shift(theme.toolbar_bg, delta + 11);
+    let btn_text    = if is_dark_toolbar { theme.sidebar_fg } else { theme.fg };
 
-    visuals.widgets.inactive.bg_fill              = btn_normal;
-    visuals.widgets.inactive.weak_bg_fill         = btn_normal;
-    visuals.widgets.inactive.fg_stroke            = egui::Stroke::new(stroke_w, btn_text);
+    let r4 = egui::CornerRadius::same(4);
 
-    visuals.widgets.hovered.bg_fill               = btn_hovered;
-    visuals.widgets.hovered.weak_bg_fill          = btn_hovered;
-    visuals.widgets.hovered.fg_stroke             = egui::Stroke::new(stroke_w + 0.5, btn_text);
+    visuals.widgets.noninteractive.bg_fill       = theme.sidebar_bg;
+    visuals.widgets.noninteractive.weak_bg_fill  = theme.sidebar_bg;
+    visuals.widgets.noninteractive.fg_stroke     = egui::Stroke::new(1.0, btn_text);
+    visuals.widgets.noninteractive.corner_radius = egui::CornerRadius::same(3);
 
-    visuals.widgets.active.bg_fill                = btn_active;
-    visuals.widgets.active.weak_bg_fill           = btn_active;
-    visuals.widgets.active.fg_stroke              = egui::Stroke::new(stroke_w + 0.5, btn_text);
+    visuals.widgets.inactive.bg_fill      = btn_normal;
+    visuals.widgets.inactive.weak_bg_fill = btn_normal;
+    visuals.widgets.inactive.fg_stroke    = egui::Stroke::new(1.0, btn_text);
+    visuals.widgets.inactive.corner_radius = r4;
 
-    visuals.widgets.open.bg_fill                  = btn_hovered;
-    visuals.widgets.open.weak_bg_fill             = btn_hovered;
-    visuals.widgets.open.fg_stroke                = egui::Stroke::new(stroke_w, btn_text);
+    visuals.widgets.hovered.bg_fill      = btn_hovered;
+    visuals.widgets.hovered.weak_bg_fill = btn_hovered;
+    visuals.widgets.hovered.fg_stroke    = egui::Stroke::new(1.0, btn_text);
+    visuals.widgets.hovered.corner_radius = r4;
+    visuals.widgets.hovered.expansion    = 1.0;
+
+    visuals.widgets.active.bg_fill      = btn_active;
+    visuals.widgets.active.weak_bg_fill = btn_active;
+    visuals.widgets.active.fg_stroke    = egui::Stroke::new(1.0, btn_text);
+    visuals.widgets.active.corner_radius = r4;
+
+    visuals.widgets.open.bg_fill      = btn_hovered;
+    visuals.widgets.open.weak_bg_fill = btn_hovered;
+    visuals.widgets.open.fg_stroke    = egui::Stroke::new(1.0, btn_text);
+    visuals.widgets.open.corner_radius = r4;
+
+    // Rounded menus / popups
+    visuals.menu_corner_radius   = egui::CornerRadius::same(6);
+    visuals.window_corner_radius = egui::CornerRadius::same(8);
+
+    // Subtle popup shadow
+    visuals.popup_shadow = egui::Shadow {
+        offset: [0, 4],
+        blur:   16,
+        spread: 0,
+        color:  egui::Color32::from_black_alpha(55),
+    };
 
     ctx.set_visuals(visuals);
 
-    // Increase body font size only — keep default horizontal spacing so table cells breathe
+    // ── Spacing / typography ──────────────────────────────────────────────────
     let mut style = (*ctx.style()).clone();
-    style.spacing.item_spacing = egui::vec2(8.0, 6.0);
-    style.text_styles.get_mut(&egui::TextStyle::Body).map(|f| {
-        f.size = 16.0;
-    });
+    style.spacing.item_spacing           = egui::vec2(8.0, 6.0);
+    style.spacing.button_padding         = egui::vec2(10.0, 5.0);
+    style.spacing.menu_margin            = egui::Margin::same(6);
+    style.spacing.indent                 = 20.0;
+    style.spacing.scroll.bar_width       = 7.0;
+    style.spacing.scroll.bar_inner_margin = 2.0;
+
+    style.text_styles.get_mut(&egui::TextStyle::Body)
+        .map(|f| f.size = 16.0);
+    style.text_styles.get_mut(&egui::TextStyle::Small)
+        .map(|f| f.size = 12.0);
+    style.text_styles.get_mut(&egui::TextStyle::Button)
+        .map(|f| f.size = 13.0);
+
     ctx.set_style(style);
+}
+
+/// Perceived luminance 0–255.
+#[inline]
+fn luma(c: egui::Color32) -> f32 {
+    0.299 * c.r() as f32 + 0.587 * c.g() as f32 + 0.114 * c.b() as f32
+}
+
+/// Shift all channels by `delta` (positive = lighter, negative = darker).
+#[inline]
+fn shift(c: egui::Color32, delta: i32) -> egui::Color32 {
+    egui::Color32::from_rgb(
+        (c.r() as i32 + delta).clamp(0, 255) as u8,
+        (c.g() as i32 + delta).clamp(0, 255) as u8,
+        (c.b() as i32 + delta).clamp(0, 255) as u8,
+    )
 }
 
 /// Build editor token colors from the active theme.
@@ -1529,8 +1592,7 @@ fn make_token_colors(theme: &crate::theme::Theme) -> crate::markdown::editor_hig
     use egui::Color32;
 
     let bg = theme.bg;
-    let luminance = 0.299 * bg.r() as f32 + 0.587 * bg.g() as f32 + 0.114 * bg.b() as f32;
-    let is_dark_bg = luminance < 128.0;
+    let is_dark_bg = luma(bg) < 128.0;
 
     // Mix a color toward the background (for muted/dimmed variants).
     let mix = |c: Color32, factor: f32| -> Color32 {
@@ -1548,10 +1610,23 @@ fn make_token_colors(theme: &crate::theme::Theme) -> crate::markdown::editor_hig
         Color32::from_rgb(10, 10, 10)
     };
 
+    // On light backgrounds, sidebar_active (accent) can have low contrast.
+    // Blend it 70% toward fg (dark ink) for a readable but tinted heading color.
+    let heading_color = if is_dark_bg {
+        theme.sidebar_active
+    } else {
+        let fg = theme.fg;
+        Color32::from_rgb(
+            (theme.sidebar_active.r() as f32 * 0.3 + fg.r() as f32 * 0.7) as u8,
+            (theme.sidebar_active.g() as f32 * 0.3 + fg.g() as f32 * 0.7) as u8,
+            (theme.sidebar_active.b() as f32 * 0.3 + fg.b() as f32 * 0.7) as u8,
+        )
+    };
+
     TokenColors {
         normal:         theme.fg,
-        heading:        theme.sidebar_active,
-        heading_marker: mix(theme.sidebar_active, 0.25),
+        heading:        heading_color,
+        heading_marker: mix(heading_color, 0.5),
         bold:           bold_color,
         italic:         mix(theme.fg, 0.3),
         bold_italic:    bold_color,

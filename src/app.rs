@@ -914,12 +914,15 @@ impl eframe::App for App {
                         let mut close_root: Option<usize>   = None;
 
                         if self.roots.is_empty() {
+                            ui.add_space(8.0);
                             ui.label(
                                 egui::RichText::new("No folder open")
-                                    .color(ui.visuals().weak_text_color()),
+                                    .color(ui.visuals().weak_text_color())
+                                    .size(13.0),
                             );
+                            ui.add_space(4.0);
                             ui.label(
-                                egui::RichText::new("Use 📁 Open Folder or Ctrl+O")
+                                egui::RichText::new("Open Folder or Ctrl+O")
                                     .color(ui.visuals().weak_text_color())
                                     .size(11.0),
                             );
@@ -930,22 +933,31 @@ impl eframe::App for App {
                                 .map(|n| n.name.clone())
                                 .unwrap_or_else(|| "?".to_string());
 
-                            // Root header: folder name + close button
+                            // Root header: uppercase section label + close button (inline)
                             ui.horizontal(|ui| {
                                 ui.label(
-                                    egui::RichText::new(format!("{root_name}"))
-                                        .strong()
+                                    egui::RichText::new(root_name.to_uppercase())
+                                        .size(10.5)
+                                        .color(ui.visuals().weak_text_color()),
                                 );
-                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                    if ui.small_button("×")
-                                        .on_hover_text("Close folder")
-                                        .clicked()
-                                    {
-                                        close_root = Some(i);
-                                    }
-                                });
+                                if ui.add(
+                                    egui::Label::new(
+                                        egui::RichText::new("×")
+                                            .size(12.0)
+                                            .color(ui.visuals().weak_text_color()),
+                                    ).sense(egui::Sense::click()),
+                                )
+                                .on_hover_text("Close folder")
+                                .clicked() {
+                                    close_root = Some(i);
+                                }
                             });
-                            ui.separator();
+                            // Thin separator line
+                            {
+                                let (_, r) = ui.allocate_space(egui::vec2(ui.available_width(), 1.0));
+                                ui.painter().rect_filled(r, 0.0, ui.visuals().widgets.noninteractive.bg_stroke.color);
+                            }
+                            ui.add_space(2.0);
 
                             if let Some(path) = render_sidebar(ui, &mut self.roots[i].0, theme.sidebar_active) {
                                 open_path = Some(path);
@@ -969,6 +981,7 @@ impl eframe::App for App {
                                 doc,
                                 &mut self.outline_open,
                                 &mut self.outline_collapsed,
+                                theme.sidebar_active,
                             ) {
                                 self.scroll_to_block = Some(block_idx);
                             }
@@ -1149,10 +1162,10 @@ impl eframe::App for App {
 
                             // Navigation buttons
                             let has = !self.search_matches.is_empty();
-                            if ui.add_enabled(has, egui::Button::new("▲")).clicked() {
+                            if ui.add_enabled(has, egui::Button::new("<")).on_hover_text("Previous match").clicked() {
                                 navigate = Some(false);
                             }
-                            if ui.add_enabled(has, egui::Button::new("▼")).clicked() {
+                            if ui.add_enabled(has, egui::Button::new(">")).on_hover_text("Next match").clicked() {
                                 navigate = Some(true);
                             }
 

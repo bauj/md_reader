@@ -1,30 +1,60 @@
 use std::collections::HashSet;
-use egui::{RichText, Ui};
+use egui::{Color32, Rect, RichText, Ui, vec2};
 use crate::markdown::{Block, Inline, ParsedDoc};
 
-/// Renders the document outline panel (H1/H2/H3 headings).
-/// `collapsed` tracks which heading block indices are folded.
-/// Returns `Some(block_index)` when the user clicks a heading title.
 pub fn render_outline(
-    ui: &mut Ui,
-    doc: &ParsedDoc,
-    open: &mut bool,
-    collapsed: &mut HashSet<usize>,
+    ui:           &mut Ui,
+    doc:          &ParsedDoc,
+    open:         &mut bool,
+    collapsed:    &mut HashSet<usize>,
+    active_color: Color32,
 ) -> Option<usize> {
     let mut scroll_to = None;
 
-    ui.separator();
+    ui.add_space(6.0);
 
-    let header = if *open { "▼ Outline" } else { "▶ Outline" };
-    if ui.selectable_label(false, header)
-        .on_hover_text("Click to expand/collapse")
-        .clicked() {
+    // ── Section header row ────────────────────────────────────────────────────
+    let header_resp = ui.horizontal(|ui| {
+        let arrow = if *open { "v" } else { ">" };
+        let arrow_resp = ui.add(
+            egui::Label::new(
+                RichText::new(arrow)
+                    .size(9.0)
+                    .color(ui.visuals().weak_text_color()),
+            )
+            .sense(egui::Sense::click()),
+        );
+        ui.add_space(4.0);
+        ui.label(
+            RichText::new("OUTLINE")
+                .size(10.0)
+                .color(ui.visuals().weak_text_color()),
+        );
+        arrow_resp.clicked()
+    });
+    if header_resp.inner {
         *open = !*open;
     }
 
     if !*open {
         return None;
     }
+
+    ui.add_space(4.0);
+
+    // ── Thin separator under header ───────────────────────────────────────────
+    let sep_rect = ui.allocate_space(vec2(ui.available_width(), 1.0)).1;
+    ui.painter().rect_filled(
+        sep_rect,
+        0.0,
+        Color32::from_rgba_unmultiplied(
+            ui.visuals().text_color().r(),
+            ui.visuals().text_color().g(),
+            ui.visuals().text_color().b(),
+            20,
+        ),
+    );
+    ui.add_space(4.0);
 
     let headings: Vec<(u32, String, usize)> = doc
         .blocks
@@ -39,24 +69,28 @@ pub fn render_outline(
         .collect();
 
     if headings.is_empty() {
-        ui.label(RichText::new("No headings").color(ui.visuals().weak_text_color()).size(12.0));
+        ui.add_space(2.0);
+        ui.label(
+            RichText::new("No headings")
+                .color(ui.visuals().weak_text_color())
+                .size(11.0),
+        );
         return None;
     }
 
-    // Level of the nearest collapsed ancestor; headings deeper than this are hidden.
+    ui.spacing_mut().item_spacing.y = 0.0;
+
     let mut skip_below: Option<u32> = None;
 
     for (i, (level, title, block_idx)) in headings.iter().enumerate() {
-        // If a parent is collapsed, skip children until we resurface.
         if let Some(skip_level) = skip_below {
             if *level > skip_level {
                 continue;
             } else {
-                skip_below = None; // back at or above the collapsed heading's level
+                skip_below = None;
             }
         }
 
-        // A heading has children if any immediately following heading is deeper.
         let has_children = headings[i + 1..]
             .iter()
             .take_while(|(l, _, _)| *l > *level)
@@ -64,17 +98,35 @@ pub fn render_outline(
             .is_some();
 
         let is_collapsed = collapsed.contains(block_idx);
-        let indent = (*level - 1) as f32 * 12.0;
 
-        ui.horizontal(|ui| {
+        // Indentation: H1 flush, H2 slight, H3 deeper
+        let indent = match level {
+            1 => 0.0,
+            2 => 10.0,
+            _ => 20.0,
+        };
+
+        // Vertical padding per level
+        let top_pad = match level {
+            1 => 5.0,
+            2 => 2.0,
+            _ => 1.0,
+        };
+        if top_pad > 0.0 { ui.add_space(top_pad); }
+
+        let clicked = ui.horizontal(|ui| {
             ui.add_space(indent);
 
-            // Fold toggle — plain clickable label, no button frame.
+            // Fold toggle
             if has_children {
-                let arrow = if is_collapsed { "▶" } else { "▼" };
+                let arrow = if is_collapsed { ">" } else { "v" };
                 let resp = ui.add(
-                    egui::Label::new(RichText::new(arrow).size(10.0))
-                        .sense(egui::Sense::click()),
+                    egui::Label::new(
+                        RichText::new(arrow)
+                            .size(9.0)
+                            .color(ui.visuals().weak_text_color()),
+                    )
+                    .sense(egui::Sense::click()),
                 );
                 if resp.clicked() {
                     if is_collapsed {
@@ -83,27 +135,56 @@ pub fn render_outline(
                         collapsed.insert(*block_idx);
                     }
                 }
+                ui.add_space(2.0);
             } else {
-                ui.add_space(14.0); // keep titles aligned
+                ui.add_space(13.0);
             }
 
+            // Heading text styled by level
             let text = match level {
-                1 => RichText::new(title.as_str()).strong().size(13.0),
-                2 => RichText::new(title.as_str()).size(12.0),
-                _ => RichText::new(title.as_str()).size(12.0).color(ui.visuals().weak_text_color()),
+                1 => RichText::new(title.as_str()).strong().size(15.0),
+                2 => RichText::new(title.as_str()).size(13.5),
+                _ => RichText::new(title.as_str())
+                    .size(12.0)
+                    .color(ui.visuals().weak_text_color()),
             };
-            if ui.selectable_label(false, text)
-                .on_hover_text(title.as_str())
-                .clicked() {
-                scroll_to = Some(*block_idx);
+
+            let resp = ui.add(
+                egui::Label::new(text)
+                    .sense(egui::Sense::click())
+                    .truncate(),
+            );
+
+            // Left accent bar for H1 (painted over the label area)
+            if *level == 1 {
+                let bar_x = resp.rect.min.x - 4.0;
+                let bar = Rect::from_min_size(
+                    egui::pos2(bar_x, resp.rect.min.y + 1.0),
+                    vec2(2.0, resp.rect.height() - 2.0),
+                );
+                let alpha = if resp.hovered() { 200u8 } else { 100u8 };
+                ui.painter().rect_filled(
+                    bar,
+                    1.0,
+                    Color32::from_rgba_unmultiplied(
+                        active_color.r(), active_color.g(), active_color.b(), alpha,
+                    ),
+                );
             }
-        });
+
+            resp.on_hover_text(title.as_str()).clicked()
+        }).inner;
+
+        if clicked {
+            scroll_to = Some(*block_idx);
+        }
 
         if has_children && is_collapsed {
             skip_below = Some(*level);
         }
     }
 
+    ui.add_space(8.0);
     scroll_to
 }
 

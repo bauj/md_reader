@@ -1209,31 +1209,50 @@ fn render_preview(
     search_current: usize,
     opts:           SearchOpts,
 ) {
+    // Measure the panel width from the OUTER ui — before entering the scroll area.
+    // Inside the scroll area the inner ui's clip_rect can grow if content overflows,
+    // which would create a feedback loop that widens the column frame-by-frame.
+    let viewport_w = ui.clip_rect().width();
+    let content_w  = (viewport_w - 48.0).min(820.0).max(200.0);
+    let side_pad   = ((viewport_w - content_w) / 2.0).max(24.0);
+
     ScrollArea::vertical()
         .id_salt(id)
         .auto_shrink([false, false])
         .show(ui, |ui| {
-            let avail = ui.available_width();
-            let max_w = 820.0f32.min(avail);
-            let h_pad = ((avail - max_w) / 2.0).max(24.0);
+            ui.add_space(24.0);
 
-            egui::Frame::new()
-                .inner_margin(egui::Margin {
-                    left:   h_pad as i8,
-                    right:  h_pad as i8,
-                    top:    24,
-                    bottom: 32,
-                })
-                .show(ui, |ui| {
-                    if let Some(doc) = doc {
-                        crate::markdown::render_markdown(
-                            ui, doc, scroll_to, hl,
-                            search_query, search_current, opts,
-                        );
-                    } else if !buffer.is_empty() {
-                        ui.label("Failed to parse markdown.");
-                    }
-                });
+            let cursor = ui.cursor();
+            let content_rect = egui::Rect::from_min_size(
+                egui::pos2(cursor.min.x + side_pad, cursor.min.y),
+                egui::vec2(content_w, 200_000.0),
+            );
+
+            // new_child() does NOT allocate space in the parent — we control that below.
+            let mut child_ui = ui.new_child(egui::UiBuilder::new().max_rect(content_rect));
+            // Hard-clip painting to content_rect so nothing renders outside the column.
+            child_ui.shrink_clip_rect(content_rect);
+
+            if let Some(doc) = doc {
+                crate::markdown::render_markdown(
+                    &mut child_ui, doc, scroll_to, hl,
+                    search_query, search_current, opts,
+                );
+            } else if !buffer.is_empty() {
+                child_ui.label("Failed to parse markdown.");
+            }
+
+            // Advance the parent cursor using the child's actual height but clamping
+            // max.x to content_rect.max.x — this prevents any layout overflow from
+            // ever reaching the scroll area and triggering the growing-width feedback loop.
+            let child_rect = child_ui.min_rect();
+            let clamped = egui::Rect::from_min_max(
+                child_rect.min,
+                egui::pos2(content_rect.max.x, child_rect.max.y),
+            );
+            ui.advance_cursor_after_rect(clamped);
+
+            ui.add_space(32.0);
         });
 }
 

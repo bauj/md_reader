@@ -14,15 +14,45 @@ pub fn render_markdown(
     search_current: usize,
     opts:           SearchOpts,
 ) {
+    // Capture content width ONCE before any block renders.
+    // At this point max_rect still reflects the original content_rect from render_preview.
+    // We use this to give every block a fresh bounded max_rect so that overflow from
+    // one block cannot grow available_width() for subsequent blocks.
+    let content_w = ui.max_rect().width();
+
     let mut occurrence = 0usize;
     for (i, block) in doc.blocks.iter().enumerate() {
-        ui.push_id(i, |ui| {
-            if scroll_to == Some(i) {
-                ui.scroll_to_cursor(Some(egui::Align::TOP));
-            }
-            render_block(ui, block, hl, search_query, search_current, opts, &mut occurrence);
-        });
-        // Increased vertical spacing between blocks for better readability
+        let cursor = ui.cursor();
+        let block_rect = egui::Rect::from_min_size(
+            cursor.min,
+            egui::vec2(content_w, 200_000.0),
+        );
+
+        // new_child() does NOT allocate in the parent — we control that below.
+        // Giving each block its own bounded max_rect prevents a wide block from
+        // growing the parent's max_rect and widening available_width() for the
+        // blocks that follow (which would break text wrapping).
+        let mut block_ui = ui.new_child(
+            egui::UiBuilder::new()
+                .id_salt(i)
+                .max_rect(block_rect),
+        );
+
+        if scroll_to == Some(i) {
+            block_ui.scroll_to_cursor(Some(egui::Align::TOP));
+        }
+
+        render_block(&mut block_ui, block, hl, search_query, search_current, opts, &mut occurrence);
+
+        // Advance the parent cursor: full rendered height, width clamped to content_w.
+        // This prevents layout overflow from ever reaching the parent UI.
+        let block_min = block_ui.min_rect();
+        let clamped = egui::Rect::from_min_max(
+            block_min.min,
+            egui::pos2(block_rect.max.x, block_min.max.y),
+        );
+        ui.advance_cursor_after_rect(clamped);
+
         ui.add_space(12.0);
     }
 }
@@ -77,6 +107,10 @@ fn render_block(
             let light_bg = luminance > 128.0;
             let lines    = hl.highlight(lang, code, light_bg);
             let mut job  = LayoutJob::default();
+            // Limit the galley to the available column width (frame inner-margin = 12px each side).
+            // Without this the LayoutJob requests its natural line width and widens the block.
+            job.wrap.max_width   = (ui.available_width() - 24.0).max(100.0);
+            job.wrap.break_anywhere = true;
             let mut bpos = 0usize; // byte cursor within `code`
 
             for line_spans in lines {
@@ -137,8 +171,10 @@ fn render_block(
                 .inner_margin(egui::Margin::symmetric(12, 10))
                 .corner_radius(6.0)
                 .show(ui, |ui| {
-                    ui.set_width(ui.available_width());
-                    
+                    let w = ui.available_width();
+                    ui.set_min_width(w);
+                    ui.set_max_width(w);
+
                     // Header with language and copy button
                     ui.horizontal(|ui| {
                         ui.vertical_centered(|ui| {
@@ -163,10 +199,7 @@ fn render_block(
                     ui.separator();
                     ui.add_space(4.0);
                     
-                    // Display the code with monospace font, left-aligned
-                    ui.with_layout(egui::Layout::left_to_right(egui::Align::Min), |ui| {
-                        ui.label(job);
-                    });
+                    ui.label(job);
                 });
         }
 
@@ -201,30 +234,32 @@ fn render_block(
         Block::List(ordered, items) => {
             for (i, item_inlines) in items.iter().enumerate() {
                 ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.y = 16.0; // Better line height for list items
-                    
-                    // Add left margin for nested lists
-                    ui.add_space(20.0); // Base indentation
-                    
+                    ui.add_space(20.0);
+
                     let bullet = if *ordered {
                         format!("{}. ", i + 1)
                     } else {
                         "• ".to_string()
                     };
-                    
-                    // Use a muted color for bullets
-                    ui.label(RichText::new(bullet)
-                        .size(16.0)
-                        .color(ui.visuals().weak_text_color())
+                    ui.label(
+                        RichText::new(bullet)
+                            .size(16.0)
+                            .color(ui.visuals().weak_text_color()),
                     );
-                    
-                    ui.add_space(12.0); // Increased spacing between bullet and text
-                    
-                    for inline in item_inlines {
-                        render_inline(ui, inline, None, false, search_query, search_current, opts, occurrence);
-                    }
+                    ui.add_space(4.0);
+
+                    // Render content in a vertical column so long items wrap within
+                    // the remaining width instead of overflowing to the right.
+                    ui.vertical(|ui| {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.spacing_mut().item_spacing.y = 16.0;
+                            for inline in item_inlines {
+                                render_inline(ui, inline, None, false, search_query, search_current, opts, occurrence);
+                            }
+                        });
+                    });
                 });
-                ui.add_space(4.0); // Space between list items
+                ui.add_space(4.0);
             }
         }
 
@@ -244,7 +279,9 @@ fn render_block(
                 .corner_radius(6.0)
                 .stroke(ui.visuals().widgets.noninteractive.bg_stroke)
                 .show(ui, |ui| {
-                    ui.set_width(ui.available_width());
+                    let w = ui.available_width();
+                    ui.set_min_width(w);
+                    ui.set_max_width(w);
 
                     TableBuilder::new(ui)
                         .striped(false) // Disable zebra striping

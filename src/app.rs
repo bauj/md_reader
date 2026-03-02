@@ -908,7 +908,8 @@ impl eframe::App for App {
         if self.recalc_sidebar_width {
             self.recalc_sidebar_width = false;
             if let Some((tree, _)) = self.roots.last() {
-                let w = crate::ui::sidebar::ideal_width(ctx, tree);
+                let max_w = ctx.screen_rect().width() * 0.30;
+                let w = crate::ui::sidebar::ideal_width(ctx, tree).min(max_w);
                 let panel_id = egui::Id::new("sidebar");
                 ctx.data_mut(|d| {
                     d.insert_persisted(

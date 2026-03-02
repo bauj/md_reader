@@ -48,8 +48,9 @@ pub fn render_sidebar(ui: &mut Ui, tree: &mut FsTree, active_color: Color32) -> 
     let mut selected_file = None;
     let mut to_expand: Option<PathBuf> = None;
 
-    // Tight item spacing for a compact file tree
-    ui.spacing_mut().item_spacing.y = 1.0;
+    // Compact vertical spacing; add horizontal padding around labels
+    ui.spacing_mut().item_spacing.y  = 10.0;
+    ui.spacing_mut().button_padding  = egui::vec2(6.0, 2.0);
 
     if let Some(ref root) = tree.root {
         render_node(ui, root, &mut tree.expanded, &mut tree.selected, &mut selected_file, &mut to_expand, active_color);
@@ -84,8 +85,11 @@ fn render_node(
                 egui::RichText::new(&label).strong().size(13.0)
             };
 
-            let resp = ui.selectable_label(is_selected, text);
+            let resp = ui.add(egui::Label::new(text).truncate().sense(egui::Sense::click()));
             paint_accent_bar(ui, resp.rect, is_selected, active_color);
+            if resp.hovered() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            }
 
             if resp.on_hover_text(node.path.to_string_lossy().as_ref()).clicked() {
                 if is_expanded {
@@ -101,7 +105,6 @@ fn render_node(
             if is_expanded {
                 if let Some(ref children) = node.children {
                     ui.indent(&node.name, |ui| {
-                        ui.spacing_mut().item_spacing.y = 1.0;
                         for child in children {
                             render_node(ui, child, expanded, selected, selected_file, to_expand, active_color);
                         }
@@ -121,8 +124,11 @@ fn render_node(
                     .size(13.0)
             };
 
-            let resp = ui.selectable_label(is_selected, text);
+            let resp = ui.add(egui::Label::new(text).truncate().sense(egui::Sense::click()));
             paint_accent_bar(ui, resp.rect, is_selected, active_color);
+            if resp.hovered() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            }
 
             if resp.on_hover_text(node.path.to_string_lossy().as_ref()).clicked() {
                 *selected      = Some(node.path.clone());
@@ -143,7 +149,10 @@ fn paint_accent_bar(ui: &Ui, row_rect: Rect, is_selected: bool, active_color: Co
     );
     ui.painter().rect_filled(row_rect, 2.0, fill);
 
-    // Solid left accent bar
-    let bar = Rect::from_min_size(row_rect.min, vec2(2.0, row_rect.height()));
+    // Solid left accent bar — offset 4px left of the label so there's a visible gap
+    let bar = Rect::from_min_size(
+        egui::pos2(row_rect.min.x - 4.0, row_rect.min.y),
+        vec2(2.0, row_rect.height()),
+    );
     ui.painter().rect_filled(bar, 0.0, active_color);
 }

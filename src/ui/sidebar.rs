@@ -2,6 +2,48 @@ use egui::{Color32, Rect, Ui, vec2};
 use crate::fs::{FsNode, FsNodeKind, FsTree};
 use std::path::PathBuf;
 
+/// Compute the sidebar width that fits the longest visible label without clipping.
+pub fn ideal_width(ctx: &egui::Context, tree: &FsTree) -> f32 {
+    let font_id = egui::FontId::proportional(13.0);
+    // egui default indent step (matches ui.indent() behaviour)
+    let indent_px = 14.0_f32;
+    // Frame inner_margin(8) left + right, plus selectable_label button_padding(4) each side
+    let overhead = 8.0 + 8.0 + 4.0 + 4.0;
+
+    let mut max_text_w = 0.0_f32;
+    if let Some(ref root) = tree.root {
+        collect_max_width(ctx, root, 0, &tree.expanded, &font_id, indent_px, &mut max_text_w);
+    }
+    (max_text_w + overhead).clamp(180.0, 520.0)
+}
+
+fn collect_max_width(
+    ctx:       &egui::Context,
+    node:      &FsNode,
+    depth:     u32,
+    expanded:  &std::collections::HashSet<PathBuf>,
+    font_id:   &egui::FontId,
+    indent_px: f32,
+    max_w:     &mut f32,
+) {
+    let label = match node.kind {
+        FsNodeKind::Dir  => format!("▶ 📁  {}", node.name),
+        FsNodeKind::File => format!("📄  {}", node.name),
+    };
+    let text_w = ctx.fonts(|f| f.layout_no_wrap(label, font_id.clone(), Color32::WHITE).size().x);
+    let total = indent_px * depth as f32 + text_w;
+    if total > *max_w {
+        *max_w = total;
+    }
+    if matches!(node.kind, FsNodeKind::Dir) && expanded.contains(&node.path) {
+        if let Some(ref children) = node.children {
+            for child in children {
+                collect_max_width(ctx, child, depth + 1, expanded, font_id, indent_px, max_w);
+            }
+        }
+    }
+}
+
 pub fn render_sidebar(ui: &mut Ui, tree: &mut FsTree, active_color: Color32) -> Option<PathBuf> {
     let mut selected_file = None;
     let mut to_expand: Option<PathBuf> = None;

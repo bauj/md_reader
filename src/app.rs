@@ -106,6 +106,9 @@ pub struct App {
 
     // Split-mode pane ratio: fraction of width given to the editor (0.2–0.8).
     split_ratio: f32,
+
+    // When true, sidebar width is re-fitted to the longest visible label next frame.
+    recalc_sidebar_width: bool,
 }
 
 impl Default for App {
@@ -142,6 +145,7 @@ impl App {
             scroll_to_block:      None,
             cursor_pos:           None,
             split_ratio:          state.split_ratio.unwrap_or(0.5),
+            recalc_sidebar_width: false,
         };
 
         if let Some(path) = initial_path {
@@ -348,6 +352,7 @@ impl App {
         }
         let watcher = FileWatcher::new(&path);
         self.roots.push((FsTree::new(path), watcher));
+        self.recalc_sidebar_width = true;
     }
 
     /// Set `selected` on every root tree (the one containing the file will highlight it).
@@ -899,6 +904,23 @@ impl eframe::App for App {
         }
 
         // ── Sidebar ───────────────────────────────────────────────────────
+        // Fit width to the longest visible label when a new root is added.
+        if self.recalc_sidebar_width {
+            self.recalc_sidebar_width = false;
+            if let Some((tree, _)) = self.roots.last() {
+                let w = crate::ui::sidebar::ideal_width(ctx, tree);
+                let panel_id = egui::Id::new("sidebar");
+                ctx.data_mut(|d| {
+                    d.insert_persisted(
+                        panel_id,
+                        egui::containers::panel::PanelState {
+                            rect: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(w, 0.0)),
+                        },
+                    );
+                });
+            }
+        }
+
         SidePanel::left("sidebar")
             .min_width(200.0)
             .default_width(250.0)

@@ -232,7 +232,7 @@ fn render_block(
         }
 
         Block::List(ordered, items) => {
-            for (i, item_inlines) in items.iter().enumerate() {
+            for (i, item) in items.iter().enumerate() {
                 ui.horizontal(|ui| {
                     ui.add_space(20.0);
 
@@ -251,12 +251,17 @@ fn render_block(
                     // Render content in a vertical column so long items wrap within
                     // the remaining width instead of overflowing to the right.
                     ui.vertical(|ui| {
-                        ui.horizontal_wrapped(|ui| {
-                            ui.spacing_mut().item_spacing.y = 16.0;
-                            for inline in item_inlines {
-                                render_inline(ui, inline, None, false, search_query, search_current, opts, occurrence);
-                            }
-                        });
+                        if !item.inlines.is_empty() {
+                            ui.horizontal_wrapped(|ui| {
+                                ui.spacing_mut().item_spacing.y = 16.0;
+                                for inline in &item.inlines {
+                                    render_inline(ui, inline, None, false, search_query, search_current, opts, occurrence);
+                                }
+                            });
+                        }
+                        for child in &item.children {
+                            render_block(ui, child, hl, search_query, search_current, opts, occurrence);
+                        }
                     });
                 });
                 ui.add_space(4.0);
@@ -354,16 +359,16 @@ fn render_inline(
     let base = size.unwrap_or(14.0);
     match inline {
         Inline::Text(t) => {
-            render_text_highlighted(ui, t, search_query, base, strong, false, opts, occurrence, search_current);
+            render_text_highlighted(ui, t, search_query, base, strong, false, None, opts, occurrence, search_current);
         }
         Inline::Bold(t) => {
-            render_text_highlighted(ui, t, search_query, base, true, false, opts, occurrence, search_current);
+            render_text_highlighted(ui, t, search_query, base, true, false, None, opts, occurrence, search_current);
         }
         Inline::Italic(t) => {
-            render_text_highlighted(ui, t, search_query, base, strong, true, opts, occurrence, search_current);
+            render_text_highlighted(ui, t, search_query, base, strong, true, None, opts, occurrence, search_current);
         }
         Inline::BoldItalic(t) => {
-            render_text_highlighted(ui, t, search_query, base, true, true, opts, occurrence, search_current);
+            render_text_highlighted(ui, t, search_query, base, true, true, None, opts, occurrence, search_current);
         }
         Inline::Code(c) => {
             // Precompute match positions before the Frame closure so we do not
@@ -487,20 +492,21 @@ fn render_inline(
 /// Uses orange background when `*occurrence == current_match`, yellow otherwise.
 /// Increments `*occurrence` once per match rendered.
 fn render_text_highlighted(
-    ui:            &mut Ui,
-    text:          &str,
-    query:         &str,
-    size:          f32,
-    bold:          bool,
-    italic:        bool,
-    opts:          SearchOpts,
-    occurrence:    &mut usize,
-    current_match: usize,
+    ui:             &mut Ui,
+    text:           &str,
+    query:          &str,
+    size:           f32,
+    bold:           bool,
+    italic:         bool,
+    explicit_color: Option<Color32>,
+    opts:           SearchOpts,
+    occurrence:     &mut usize,
+    current_match:  usize,
 ) {
     let matches = find_matches(text, query, opts);
 
     if matches.is_empty() {
-        ui.label(styled_rt(text, size, bold, italic));
+        ui.label(styled_rt(text, size, bold, italic, explicit_color));
         return;
     }
 
@@ -510,7 +516,7 @@ fn render_text_highlighted(
     for &start in &matches {
         let end = start + qlen;
         if start > pos {
-            ui.label(styled_rt(&text[pos..start], size, bold, italic));
+            ui.label(styled_rt(&text[pos..start], size, bold, italic, explicit_color));
         }
         let bg = if *occurrence == current_match {
             Color32::from_rgb(255, 150, 0)
@@ -519,14 +525,14 @@ fn render_text_highlighted(
         };
         *occurrence += 1;
         ui.label(
-            styled_rt(&text[start..end], size, bold, italic)
+            styled_rt(&text[start..end], size, bold, italic, explicit_color)
                 .background_color(bg)
                 .color(Color32::BLACK),
         );
         pos = end;
     }
     if pos < text.len() {
-        ui.label(styled_rt(&text[pos..], size, bold, italic));
+        ui.label(styled_rt(&text[pos..], size, bold, italic, explicit_color));
     }
 }
 
@@ -577,11 +583,16 @@ fn needle_len(query: &str, opts: SearchOpts) -> usize {
 }
 
 #[inline]
-fn styled_rt(text: &str, size: f32, bold: bool, italic: bool) -> RichText {
-    let rt = RichText::new(text).size(size);
-    let rt = if bold   { rt.strong()  } else { rt };
+fn styled_rt(text: &str, size: f32, bold: bool, italic: bool, explicit_color: Option<Color32>) -> RichText {
+    let rt = if bold {
+        RichText::new(text)
+            .size(size)
+            .font(FontId::new(size, egui::FontFamily::Name("Bold".into())))
+    } else {
+        RichText::new(text).size(size)
+    };
     let rt = if italic { rt.italics() } else { rt };
-    rt
+    if let Some(c) = explicit_color { rt.color(c) } else { rt }
 }
 
 /// Load an image from a file path, returning ImageData for egui.

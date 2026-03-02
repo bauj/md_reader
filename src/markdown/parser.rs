@@ -11,9 +11,15 @@ pub enum Block {
     Paragraph(Vec<Inline>),
     CodeBlock(String, String),       // language, code
     BlockQuote(Vec<Inline>),
-    List(bool, Vec<Vec<Inline>>),    // ordered, items
+    List(bool, Vec<ListItem>),       // ordered, items
     Table(Vec<Vec<Inline>>, Vec<Vec<Vec<Inline>>>), // headers, rows (each cell is a Vec<Inline>)
     Rule,
+}
+
+#[derive(Clone, Debug)]
+pub struct ListItem {
+    pub inlines:  Vec<Inline>,
+    pub children: Vec<Block>,   // nested sub-lists
 }
 
 #[derive(Clone, Debug)]
@@ -47,10 +53,14 @@ pub fn parse_markdown(text: &str) -> ParsedDoc {
     enum Ctx { None, Heading(u32), Paragraph, BlockQuote, ListItem, CodeBlock, TableCell }
     let mut ctx = Ctx::None;
 
-    // List state
-    let mut list_ordered = false;
-    let mut list_items: Vec<Vec<Inline>> = Vec::new();
-    let mut in_list_item = false;
+    // List state — stack to support nested lists
+    struct ListFrame {
+        ordered:       bool,
+        items:         Vec<ListItem>,
+        item_children: Vec<Block>,  // sub-blocks for the item currently being parsed
+        item_inlines:  Vec<Inline>, // parent item's inlines saved when a sub-list starts
+    }
+    let mut list_stack: Vec<ListFrame> = Vec::new();
 
     // Code block state
     let mut code_lang = String::new();
@@ -80,7 +90,7 @@ pub fn parse_markdown(text: &str) -> ParsedDoc {
                 ctx = Ctx::Heading(level as u32);
             }
             Event::Start(Tag::Paragraph) => {
-                if !in_list_item {
+                if list_stack.is_empty() {
                     current_inlines.clear();
                     ctx = Ctx::Paragraph;
                 }
@@ -91,13 +101,24 @@ pub fn parse_markdown(text: &str) -> ParsedDoc {
                 ctx = Ctx::BlockQuote;
             }
             Event::Start(Tag::List(order)) => {
-                list_ordered = order.is_some();
-                list_items.clear();
+                let saved = if list_stack.is_empty() {
+                    Vec::new()
+                } else {
+                    std::mem::take(&mut current_inlines)
+                };
+                list_stack.push(ListFrame {
+                    ordered:       order.is_some(),
+                    items:         Vec::new(),
+                    item_children: Vec::new(),
+                    item_inlines:  saved,
+                });
             }
             Event::Start(Tag::Item) => {
                 current_inlines.clear();
+                if let Some(frame) = list_stack.last_mut() {
+                    frame.item_children.clear();
+                }
                 ctx = Ctx::ListItem;
-                in_list_item = true;
             }
             Event::Start(Tag::CodeBlock(kind)) => {
                 code_lang = match kind {
@@ -127,7 +148,7 @@ pub fn parse_markdown(text: &str) -> ParsedDoc {
                 ctx = Ctx::None;
             }
             Event::End(TagEnd::Paragraph) => {
-                if in_list_item {
+                if !list_stack.is_empty() {
                     // inlines stay in current_inlines; End(Item) will collect them
                 } else if ctx == Ctx::Paragraph {
                     blocks.push(Block::Paragraph(std::mem::take(&mut current_inlines)));
@@ -141,12 +162,25 @@ pub fn parse_markdown(text: &str) -> ParsedDoc {
                 ctx = Ctx::None;
             }
             Event::End(TagEnd::Item) => {
-                list_items.push(std::mem::take(&mut current_inlines));
+                if let Some(frame) = list_stack.last_mut() {
+                    let children = std::mem::take(&mut frame.item_children);
+                    frame.items.push(ListItem {
+                        inlines:  std::mem::take(&mut current_inlines),
+                        children,
+                    });
+                }
                 ctx = Ctx::None;
-                in_list_item = false;
             }
             Event::End(TagEnd::List(_)) => {
-                blocks.push(Block::List(list_ordered, std::mem::take(&mut list_items)));
+                if let Some(frame) = list_stack.pop() {
+                    let list_block = Block::List(frame.ordered, frame.items);
+                    if list_stack.is_empty() {
+                        blocks.push(list_block);
+                    } else {
+                        current_inlines = frame.item_inlines;
+                        list_stack.last_mut().unwrap().item_children.push(list_block);
+                    }
+                }
             }
             Event::End(TagEnd::CodeBlock) => {
                 blocks.push(Block::CodeBlock(

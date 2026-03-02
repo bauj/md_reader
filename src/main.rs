@@ -36,12 +36,24 @@ fn setup_fonts(ctx: &egui::Context) {
         )),
     );
 
+    fonts.font_data.insert(
+        "NotoSans-Bold".to_owned(),
+        std::sync::Arc::new(egui::FontData::from_static(
+            include_bytes!("../assets/fonts/NotoSans-Bold.ttf"),
+        )),
+    );
+
     // JetBrains Mono as the first monospace font (code blocks, editor)
     fonts
         .families
         .entry(egui::FontFamily::Monospace)
         .or_default()
         .insert(0, "JetBrainsMono".to_owned());
+
+    // Named "Bold" family for bold inline text in the markdown renderer
+    fonts
+        .families
+        .insert(egui::FontFamily::Name("Bold".into()), vec!["NotoSans-Bold".to_owned()]);
 
     ctx.set_fonts(fonts);
 }

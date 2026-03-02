@@ -1485,7 +1485,7 @@ fn block_plain_text(block: &crate::markdown::Block) -> String {
         Block::Heading(_, ils) | Block::Paragraph(ils) | Block::BlockQuote(ils) => {
             inlines_text(ils)
         }
-        Block::List(_, items) => items.iter().map(|i| inlines_text(i)).collect::<Vec<_>>().join("\n"),
+        Block::List(_, items) => items.iter().map(|i| inlines_text(&i.inlines)).collect::<Vec<_>>().join("\n"),
         Block::CodeBlock(_, code) => code.clone(),
         Block::Table(headers, rows) => {
             let mut s = headers.iter().map(|h| inlines_text(h)).collect::<Vec<_>>().join(" ");

@@ -1209,10 +1209,11 @@ fn render_preview(
     search_current: usize,
     opts:           SearchOpts,
 ) {
-    // Measure the panel width from the OUTER ui — before entering the scroll area.
-    // Inside the scroll area the inner ui's clip_rect can grow if content overflows,
-    // which would create a feedback loop that widens the column frame-by-frame.
-    let viewport_w = ui.clip_rect().width();
+    // Measure from max_rect, which correctly reflects the column width in split mode.
+    // clip_rect() would return the parent panel's full width because ui.columns() does
+    // not narrow the clip rect — only max_rect is set to the column's allocated rect.
+    // Reading max_rect here (before the scroll area) is stable; it won't grow later.
+    let viewport_w = ui.max_rect().width();
     let content_w  = (viewport_w - 48.0).min(820.0).max(200.0);
     let side_pad   = ((viewport_w - content_w) / 2.0).max(24.0);
 

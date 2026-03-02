@@ -288,9 +288,12 @@ fn render_block(
                     ui.set_min_width(w);
                     ui.set_max_width(w);
 
+                    let spacing_x = ui.spacing().item_spacing.x;
+                    let col_width = ((w - spacing_x * (col_count as f32 - 1.0)) / col_count as f32).max(0.0);
+
                     TableBuilder::new(ui)
                         .striped(false) // Disable zebra striping
-                        .columns(Column::remainder().resizable(true), col_count)
+                        .columns(Column::exact(col_width), col_count)
                         .header(28.0, |mut row| {
                             for header_inlines in headers {
                                 row.col(|ui| {

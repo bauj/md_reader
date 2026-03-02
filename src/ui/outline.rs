@@ -25,12 +25,18 @@ pub fn render_outline(
             .sense(egui::Sense::click()),
         );
         ui.add_space(4.0);
-        ui.label(
-            RichText::new("OUTLINE")
-                .size(10.0)
-                .color(ui.visuals().weak_text_color()),
+        let label_resp = ui.add(
+            egui::Label::new(
+                RichText::new("OUTLINE")
+                    .size(10.0)
+                    .color(ui.visuals().weak_text_color()),
+            )
+            .sense(egui::Sense::click()),
         );
-        arrow_resp.clicked()
+        if arrow_resp.hovered() || label_resp.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+        arrow_resp.clicked() || label_resp.clicked()
     });
     if header_resp.inner {
         *open = !*open;
@@ -128,6 +134,9 @@ pub fn render_outline(
                     )
                     .sense(egui::Sense::click()),
                 );
+                if resp.hovered() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                }
                 if resp.clicked() {
                     if is_collapsed {
                         collapsed.remove(block_idx);
@@ -149,11 +158,27 @@ pub fn render_outline(
                     .color(ui.visuals().weak_text_color()),
             };
 
+            // Reserve a shape slot before the label so the highlight paints behind the text
+            let highlight_idx = ui.painter().add(egui::Shape::Noop);
+
             let resp = ui.add(
                 egui::Label::new(text)
                     .sense(egui::Sense::click())
                     .truncate(),
             );
+
+            // Hover highlight and hand cursor for all headings
+            if resp.hovered() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                ui.painter().set(
+                    highlight_idx,
+                    egui::Shape::rect_filled(
+                        resp.rect.expand2(egui::vec2(4.0, 1.0)),
+                        2.0,
+                        ui.visuals().widgets.hovered.bg_fill,
+                    ),
+                );
+            }
 
             // Left accent bar for H1 (painted over the label area)
             if *level == 1 {
@@ -172,7 +197,7 @@ pub fn render_outline(
                 );
             }
 
-            resp.on_hover_text(title.as_str()).clicked()
+            resp.clicked()
         }).inner;
 
         if clicked {

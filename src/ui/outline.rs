@@ -114,9 +114,9 @@ pub fn render_outline(
 
         // Vertical padding per level
         let top_pad = match level {
-            1 => 5.0,
-            2 => 2.0,
-            _ => 1.0,
+            1 => 11.0,
+            2 => 7.0,
+            _ => 4.0,
         };
         if top_pad > 0.0 { ui.add_space(top_pad); }
 
@@ -151,10 +151,10 @@ pub fn render_outline(
 
             // Heading text styled by level
             let text = match level {
-                1 => RichText::new(title.as_str()).strong().size(15.0),
-                2 => RichText::new(title.as_str()).size(13.5),
+                1 => RichText::new(title.as_str()).strong().size(16.5),
+                2 => RichText::new(title.as_str()).size(15.0),
                 _ => RichText::new(title.as_str())
-                    .size(12.0)
+                    .size(13.5)
                     .color(ui.visuals().weak_text_color()),
             };
 

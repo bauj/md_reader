@@ -3,7 +3,6 @@ use egui::Color32;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ThemeId {
     Light,
-    Rust,
     Coal,
     Navy,
     Ayu,
@@ -13,7 +12,6 @@ impl ThemeId {
     pub fn name(self) -> &'static str {
         match self {
             ThemeId::Light => "Light",
-            ThemeId::Rust  => "Rust",
             ThemeId::Coal  => "Coal",
             ThemeId::Navy  => "Navy",
             ThemeId::Ayu   => "Ayu",
@@ -71,28 +69,6 @@ pub const THEMES: &[Theme] = &[
         inline_code_fg: Color32::from_rgb(172, 20, 92), // distinctive crimson
         separator:      Color32::from_rgb(200, 195, 184),
         quote_bg:       Color32::from_rgb(230, 226, 216),
-    },
-
-    // ── Rust — "Forge" ───────────────────────────────────────────────────────
-    // Charred wood sidebar, amber parchment content.
-    // The feeling of a blacksmith's workshop in late afternoon light.
-    Theme {
-        id:   ThemeId::Rust,
-        name: "Rust",
-        bg:          Color32::from_rgb(244, 238, 220), // warm amber parchment
-        sidebar_bg:  Color32::from_rgb(50, 29, 14),    // charred deep brown
-        toolbar_bg:  Color32::from_rgb(62, 38, 20),    // slightly lighter toolbar
-        tab_bar_bg:  Color32::from_rgb(38, 22, 10),    // near-black brown strip
-        fg:          Color32::from_rgb(40, 30, 12),    // dark warm ink
-        fg_muted:    Color32::from_rgb(105, 82, 56),   // warm tan-gray
-        sidebar_fg:  Color32::from_rgb(238, 210, 165), // warm golden cream
-        sidebar_active: Color32::from_rgb(225, 128, 30), // cooling ember orange
-        link:           Color32::from_rgb(165, 58, 10),  // rusty red
-        selection_bg:   Color32::from_rgb(200, 148, 72),
-        code_bg:        Color32::from_rgb(226, 215, 192),
-        inline_code_fg: Color32::from_rgb(150, 28, 55),  // warm crimson
-        separator:      Color32::from_rgb(188, 165, 132),
-        quote_bg:       Color32::from_rgb(226, 215, 192),
     },
 
     // ── Coal — "Graphite" ────────────────────────────────────────────────────

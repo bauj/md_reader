@@ -185,7 +185,6 @@ impl App {
 
     fn parse_theme(s: &str) -> ThemeId {
         match s {
-            "rust" => ThemeId::Rust,
             "coal" => ThemeId::Coal,
             "navy" => ThemeId::Navy,
             "ayu" => ThemeId::Ayu,
@@ -277,7 +276,6 @@ impl App {
     fn save_state(&self) {
         let theme_str = match self.active_theme {
             ThemeId::Light => "light",
-            ThemeId::Rust => "rust",
             ThemeId::Coal => "coal",
             ThemeId::Navy => "navy",
             ThemeId::Ayu => "ayu",

@@ -1365,6 +1365,119 @@ fn render_preview(
 /// when the TextEdit is focused, or `None` otherwise.
 /// Returns the current cursor position as `Some((line, col))` (both 1-indexed)
 /// when the TextEdit is focused, or `None` otherwise.
+/// Apply Tab indent or Shift+Tab unindent to the editor buffer based on the current cursor/selection.
+/// Updates egui's TextEditState so the cursor follows the edit.  Returns true if the buffer changed.
+fn editor_apply_indent(
+    ctx:          &egui::Context,
+    te_id:        egui::Id,
+    buffer:       &mut String,
+    cursor_range: egui::text::CursorRange,
+    indent:       bool,
+) -> bool {
+    use egui::text::{CCursor, CCursorRange};
+    use egui::text_edit::TextEditState;
+
+    // ── helpers ────────────────────────────────────────────────────────────
+    fn char_to_byte(s: &str, char_idx: usize) -> usize {
+        s.char_indices().nth(char_idx).map_or(s.len(), |(b, _)| b)
+    }
+    fn byte_to_char(s: &str, byte_pos: usize) -> usize {
+        s[..byte_pos.min(s.len())].chars().count()
+    }
+    fn line_start_byte(s: &str, byte_pos: usize) -> usize {
+        s[..byte_pos].rfind('\n').map_or(0, |i| i + 1)
+    }
+
+    let primary_char   = cursor_range.primary.ccursor.index;
+    let secondary_char = cursor_range.secondary.ccursor.index;
+    let has_selection  = primary_char != secondary_char;
+
+    let (new_primary, new_secondary) = if !has_selection {
+        // ── No selection: operate on current line / cursor position ──────
+        let cursor_byte = char_to_byte(buffer, primary_char);
+
+        if indent {
+            // Insert 4 spaces at the cursor position.
+            buffer.insert_str(cursor_byte, "    ");
+            let p = primary_char + 4;
+            (p, p)
+        } else {
+            // Remove up to 4 leading spaces from the current line.
+            let ls_byte = line_start_byte(buffer, cursor_byte);
+            let spaces: usize = buffer[ls_byte..].chars().take(4).take_while(|&c| c == ' ').count();
+            if spaces == 0 { return false; }
+            buffer.drain(ls_byte..ls_byte + spaces);
+            // Move cursor back by the removed count, but not before the line start.
+            let new_byte = cursor_byte.saturating_sub(spaces).max(ls_byte);
+            let p = byte_to_char(buffer, new_byte);
+            (p, p)
+        }
+    } else {
+        // ── Selection: indent/unindent every touched line ─────────────────
+        let (sel_start, sel_end, primary_first) = if primary_char <= secondary_char {
+            (primary_char, secondary_char, true)
+        } else {
+            (secondary_char, primary_char, false)
+        };
+
+        let sel_start_byte = char_to_byte(buffer, sel_start);
+        let sel_end_byte   = char_to_byte(buffer, sel_end);
+        let first_ls_byte  = line_start_byte(buffer, sel_start_byte);
+        let first_ls_char  = byte_to_char(buffer, first_ls_byte);
+
+        // Collect byte offsets of all line starts in the selection (forward order).
+        let mut line_starts: Vec<usize> = vec![first_ls_byte];
+        let mut pos = first_ls_byte;
+        loop {
+            match buffer[pos..].find('\n') {
+                None => break,
+                Some(rel) => {
+                    let next = pos + rel + 1;
+                    if next > sel_end_byte { break; }
+                    line_starts.push(next);
+                    pos = next;
+                }
+            }
+        }
+
+        if indent {
+            // Insert 4 spaces at each line start, back-to-front to preserve offsets.
+            for &ls in line_starts.iter().rev() {
+                buffer.insert_str(ls, "    ");
+            }
+            let n = line_starts.len() * 4;
+            let ns = sel_start + 4;
+            let ne = sel_end + n;
+            if primary_first { (ns, ne) } else { (ne, ns) }
+        } else {
+            // Remove up to 4 leading spaces from each line, back-to-front.
+            let mut total_removed = 0usize;
+            let mut first_removed = 0usize;
+            for (i, &ls) in line_starts.iter().enumerate().rev() {
+                let sp: usize = buffer[ls..].chars().take(4).take_while(|&c| c == ' ').count();
+                if sp > 0 { buffer.drain(ls..ls + sp); }
+                total_removed += sp;
+                if i == 0 { first_removed = sp; }
+            }
+            if total_removed == 0 { return false; }
+            let ns = (sel_start as isize - first_removed as isize)
+                .max(first_ls_char as isize) as usize;
+            let ne = (sel_end as isize - total_removed as isize).max(0) as usize;
+            if primary_first { (ns, ne) } else { (ne, ns) }
+        }
+    };
+
+    // Update egui's cursor so it follows the edit.
+    if let Some(mut state) = TextEditState::load(ctx, te_id) {
+        state.cursor.set_char_range(Some(CCursorRange {
+            primary:   CCursor::new(new_primary),
+            secondary: CCursor::new(new_secondary),
+        }));
+        state.store(ctx, te_id);
+    }
+    true
+}
+
 fn render_editor(
     ui:               &mut egui::Ui,
     buffer:           &mut String,
@@ -1378,6 +1491,24 @@ fn render_editor(
     page_scroll:      f32,
     token_colors:     crate::markdown::editor_highlight::TokenColors,
 ) -> Option<(usize, usize)> {
+    let te_id = egui::Id::new(id).with("te");
+    // Drain ALL Tab key-press events from the queue before any widget sees them.
+    // consume_key() modifiers matching can be unreliable (Shift+Tab vs Tab), so
+    // we walk the events directly and classify each one ourselves.
+    let (tab_indent, tab_unindent) = ui.ctx().input_mut(|i| {
+        let mut indent   = false;
+        let mut unindent = false;
+        i.events.retain(|e| {
+            if let egui::Event::Key { key: Key::Tab, pressed: true, modifiers, .. } = e {
+                if modifiers.shift { unindent = true; } else { indent = true; }
+                false // remove from queue
+            } else {
+                true
+            }
+        });
+        (indent, unindent)
+    });
+
     let mut cursor_out: Option<(usize, usize)> = None;
     ScrollArea::vertical()
         .id_salt(id)
@@ -1476,16 +1607,32 @@ fn render_editor(
                 ui.fonts(|f| f.layout_job(job))
             };
 
-            let te_id = egui::Id::new(id).with("te");
             // Use TextEdit::show() (instead of ui.add) to access the galley for
             // accurate cursor-rect scrolling.
             let output = TextEdit::multiline(buffer)
                 .id(te_id)
+                .lock_focus(true)  // prevent Tab from surrendering keyboard focus
                 .font(egui::TextStyle::Monospace)
                 .desired_width(f32::INFINITY)
                 .desired_rows(40)
                 .layouter(&mut layouter)
                 .show(ui);
+
+            // Apply Tab indent / Shift+Tab unindent now that we have cursor info.
+            // output.cursor_range is Some only when the TextEdit has keyboard focus.
+            if tab_indent || tab_unindent {
+                if let Some(cr) = output.cursor_range {
+                    // Editor is focused: apply indent/unindent.
+                    if editor_apply_indent(ui.ctx(), te_id, buffer, cr, tab_indent) {
+                        *modified      = true;
+                        *needs_reparse = true;
+                    }
+                } else {
+                    // Editor not focused: give it focus (Tab was already consumed,
+                    // so toolbar buttons won't be reached).
+                    ui.ctx().memory_mut(|m| m.request_focus(te_id));
+                }
+            }
 
             // Scroll so the current search match is visible: convert the byte offset
             // to a char cursor, ask the galley for the pixel rect, then tell the

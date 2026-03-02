@@ -449,6 +449,9 @@ impl eframe::App for App {
         let ctrl_f     = ctx.input(|i| i.key_pressed(Key::F)        && i.modifiers.ctrl);
         let ctrl_left  = ctx.input(|i| i.key_pressed(Key::PageUp)   && i.modifiers.ctrl);
         let ctrl_right = ctx.input(|i| i.key_pressed(Key::PageDown) && i.modifiers.ctrl);
+        let page_up    = ctx.input(|i| i.key_pressed(Key::PageUp)   && !i.modifiers.ctrl);
+        let page_down  = ctx.input(|i| i.key_pressed(Key::PageDown) && !i.modifiers.ctrl);
+        let page_scroll: f32 = if page_up { 1.0 } else if page_down { -1.0 } else { 0.0 };
         let escape     = ctx.input(|i| i.key_pressed(Key::Escape));
         let enter      = ctx.input(|i| i.key_pressed(Key::Enter) && !i.modifiers.shift);
         let shift_enter= ctx.input(|i| i.key_pressed(Key::Enter) &&  i.modifiers.shift);
@@ -1056,7 +1059,7 @@ impl eframe::App for App {
                         let sq   = self.search_query.as_str();
                         let sc   = self.search_current;
                         let opts = SearchOpts { case_sensitive: self.search_case_sensitive, whole_word: self.search_whole_word };
-                        render_preview(ui, &tab.parsed_doc, &tab.buffer, scroll_to, "preview", &mut self.highlighter, sq, sc, opts);
+                        render_preview(ui, &tab.parsed_doc, &tab.buffer, scroll_to, page_scroll, "preview", &mut self.highlighter, sq, sc, opts);
                     }
                     ViewMode::Edit => {
                         let sm   = self.search_matches.as_slice();
@@ -1075,7 +1078,7 @@ impl eframe::App for App {
                         let buffer_changed = {
                             let tab = &mut self.tabs[idx];
                             let before = tab.needs_reparse;
-                            let cpos = render_editor(ui, &mut tab.buffer, &mut tab.modified, &mut tab.needs_reparse, "editor", sm, ql, sc, sto, tc);
+                            let cpos = render_editor(ui, &mut tab.buffer, &mut tab.modified, &mut tab.needs_reparse, "editor", sm, ql, sc, sto, page_scroll, tc);
                             self.cursor_pos = cpos;
                             !before && tab.needs_reparse
                         };
@@ -1147,6 +1150,11 @@ impl eframe::App for App {
                             egui::Stroke::new(1.5, divider_color),
                         );
 
+                        // Only scroll the pane the pointer is hovering over (mirrors mouse-wheel behaviour).
+                        let pointer = ctx.pointer_latest_pos();
+                        let left_scroll  = if pointer.map_or(false, |p| left_rect.contains(p))  { page_scroll } else { 0.0 };
+                        let right_scroll = if pointer.map_or(false, |p| right_rect.contains(p)) { page_scroll } else { 0.0 };
+
                         // Render editor and preview as bounded children
                         let mut left_ui = ui.new_child(egui::UiBuilder::new().max_rect(left_rect));
                         split_cursor = render_editor(
@@ -1159,6 +1167,7 @@ impl eframe::App for App {
                             ql,
                             sc,
                             sto,
+                            left_scroll,
                             tc,
                         );
 
@@ -1168,6 +1177,7 @@ impl eframe::App for App {
                             &tab.parsed_doc,
                             &tab.buffer,
                             scroll_to,
+                            right_scroll,
                             "split_preview",
                             hl,
                             &sq,
@@ -1276,6 +1286,7 @@ fn render_preview(
     doc:            &Option<ParsedDoc>,
     buffer:         &str,
     scroll_to:      Option<usize>,
+    page_scroll:    f32,
     id:             &str,
     hl:             &mut Highlighter,
     search_query:   &str,
@@ -1294,6 +1305,22 @@ fn render_preview(
         .id_salt(id)
         .auto_shrink([false, false])
         .show(ui, |ui| {
+            if page_scroll != 0.0 {
+                let clip = ui.clip_rect();
+                if page_scroll > 0.0 {
+                    // PageUp: scroll up one page
+                    ui.scroll_to_rect(
+                        egui::Rect::from_x_y_ranges(clip.x_range(), clip.min.y - 1.0..=clip.min.y),
+                        Some(egui::Align::BOTTOM),
+                    );
+                } else {
+                    // PageDown: scroll down one page
+                    ui.scroll_to_rect(
+                        egui::Rect::from_x_y_ranges(clip.x_range(), clip.max.y..=clip.max.y + 1.0),
+                        Some(egui::Align::TOP),
+                    );
+                }
+            }
             ui.add_space(24.0);
 
             let cursor = ui.cursor();
@@ -1344,6 +1371,7 @@ fn render_editor(
     query_len:        usize,
     current_match:    usize,
     scroll_to_offset: Option<usize>,
+    page_scroll:      f32,
     token_colors:     crate::markdown::editor_highlight::TokenColors,
 ) -> Option<(usize, usize)> {
     let mut cursor_out: Option<(usize, usize)> = None;
@@ -1351,6 +1379,22 @@ fn render_editor(
         .id_salt(id)
         .auto_shrink([false; 2])
         .show(ui, |ui| {
+            if page_scroll != 0.0 {
+                let clip = ui.clip_rect();
+                if page_scroll > 0.0 {
+                    // PageUp: scroll up one page
+                    ui.scroll_to_rect(
+                        egui::Rect::from_x_y_ranges(clip.x_range(), clip.min.y - 1.0..=clip.min.y),
+                        Some(egui::Align::BOTTOM),
+                    );
+                } else {
+                    // PageDown: scroll down one page
+                    ui.scroll_to_rect(
+                        egui::Rect::from_x_y_ranges(clip.x_range(), clip.max.y..=clip.max.y + 1.0),
+                        Some(egui::Align::TOP),
+                    );
+                }
+            }
             let matches = search_matches.to_vec();
             let cur     = current_match;
             let qlen    = query_len;

@@ -911,7 +911,7 @@ impl eframe::App for App {
         if self.recalc_sidebar_width {
             self.recalc_sidebar_width = false;
             if let Some((tree, _)) = self.roots.last() {
-                let max_w = ctx.screen_rect().width() * 0.30;
+                let max_w = ctx.screen_rect().width() * 0.25;
                 let w = crate::ui::sidebar::ideal_width(ctx, tree).min(max_w);
                 let panel_id = egui::Id::new("sidebar");
                 ctx.data_mut(|d| {
@@ -927,6 +927,7 @@ impl eframe::App for App {
 
         SidePanel::left("sidebar")
             .min_width(200.0)
+            .max_width(ctx.screen_rect().width() * 0.25)
             .default_width(250.0)
             .frame(egui::Frame::new()
                 .fill(theme.sidebar_bg)

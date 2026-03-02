@@ -17,6 +17,9 @@ pub struct AppState {
     /// Active theme: "light" | "rust" | "coal" | "navy" | "ayu".
     #[serde(default = "default_theme")]
     pub theme: String,
+    /// Fraction of split-mode width given to the editor pane (0.2–0.8).
+    #[serde(default)]
+    pub split_ratio: Option<f32>,
 }
 
 fn default_theme() -> String {

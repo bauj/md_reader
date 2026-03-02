@@ -103,6 +103,9 @@ pub struct App {
 
     // Status bar — last known cursor position in the editor (1-indexed line, col).
     cursor_pos: Option<(usize, usize)>,
+
+    // Split-mode pane ratio: fraction of width given to the editor (0.2–0.8).
+    split_ratio: f32,
 }
 
 impl Default for App {
@@ -138,6 +141,7 @@ impl App {
             outline_collapsed:    HashSet::new(),
             scroll_to_block:      None,
             cursor_pos:           None,
+            split_ratio:          state.split_ratio.unwrap_or(0.5),
         };
 
         if let Some(path) = initial_path {
@@ -287,6 +291,7 @@ impl App {
             view_mode:    self.view_mode.as_str().to_string(),
             recent_files: self.recent_files.clone(),
             theme:        theme_str.to_string(),
+            split_ratio:  Some(self.split_ratio),
         };
         persist::save(&state);
     }
@@ -1079,31 +1084,78 @@ impl eframe::App for App {
                         let hl   = &mut self.highlighter;
                         let mut split_cursor: Option<(usize, usize)> = None;
                         {
-                        ui.columns(2, |cols| {
-                            split_cursor = render_editor(
-                                &mut cols[0],
-                                &mut tab.buffer,
-                                &mut tab.modified,
-                                &mut tab.needs_reparse,
-                                "split_editor",
-                                &sm,
-                                ql,
-                                sc,
-                                sto,
-                                tc,
-                            );
-                            render_preview(
-                                &mut cols[1],
-                                &tab.parsed_doc,
-                                &tab.buffer,
-                                scroll_to,
-                                "split_preview",
-                                hl,
-                                &sq,
-                                sc,
-                                opts,
-                            );
-                        });
+                        // Manual split layout — avoids ui.columns() which always splits 50/50.
+                        let available = ui.available_rect_before_wrap();
+                        let total_w   = available.width();
+                        let handle_w  = 6.0_f32;
+                        let left_w    = ((total_w - handle_w) * self.split_ratio).max(80.0);
+                        let right_w   = (total_w - handle_w - left_w).max(80.0);
+                        let _ = right_w; // used implicitly via right_rect
+
+                        let left_rect   = egui::Rect::from_min_max(available.min,
+                            egui::pos2(available.min.x + left_w, available.max.y));
+                        let handle_rect = egui::Rect::from_min_max(
+                            egui::pos2(available.min.x + left_w, available.min.y),
+                            egui::pos2(available.min.x + left_w + handle_w, available.max.y));
+                        let right_rect  = egui::Rect::from_min_max(
+                            egui::pos2(available.min.x + left_w + handle_w, available.min.y),
+                            available.max);
+
+                        // Drag handle interaction
+                        let handle_id   = ui.id().with("split_handle");
+                        let handle_resp = ui.interact(handle_rect, handle_id, egui::Sense::drag());
+                        if handle_resp.dragged() {
+                            let new_left = (left_w + handle_resp.drag_delta().x)
+                                .max(80.0)
+                                .min(total_w - handle_w - 80.0);
+                            self.split_ratio = (new_left / (total_w - handle_w)).clamp(0.25, 0.75);
+                        }
+                        if handle_resp.hovered() || handle_resp.dragged() {
+                            ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+                        }
+
+                        // Draw visual divider (brighter when active)
+                        let divider_color = if handle_resp.hovered() || handle_resp.dragged() {
+                            ui.visuals().widgets.active.bg_fill
+                        } else {
+                            ui.visuals().widgets.noninteractive.bg_stroke.color
+                        };
+                        ui.painter().vline(
+                            handle_rect.center().x,
+                            available.y_range(),
+                            egui::Stroke::new(1.5, divider_color),
+                        );
+
+                        // Render editor and preview as bounded children
+                        let mut left_ui = ui.new_child(egui::UiBuilder::new().max_rect(left_rect));
+                        split_cursor = render_editor(
+                            &mut left_ui,
+                            &mut tab.buffer,
+                            &mut tab.modified,
+                            &mut tab.needs_reparse,
+                            "split_editor",
+                            &sm,
+                            ql,
+                            sc,
+                            sto,
+                            tc,
+                        );
+
+                        let mut right_ui = ui.new_child(egui::UiBuilder::new().max_rect(right_rect));
+                        render_preview(
+                            &mut right_ui,
+                            &tab.parsed_doc,
+                            &tab.buffer,
+                            scroll_to,
+                            "split_preview",
+                            hl,
+                            &sq,
+                            sc,
+                            opts,
+                        );
+
+                        // Advance parent cursor to cover the full area we occupied
+                        ui.advance_cursor_after_rect(available);
                         }
                         self.cursor_pos = split_cursor;
                     }

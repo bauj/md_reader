@@ -449,9 +449,13 @@ impl eframe::App for App {
         let ctrl_f     = ctx.input(|i| i.key_pressed(Key::F)        && i.modifiers.ctrl);
         let ctrl_left  = ctx.input(|i| i.key_pressed(Key::PageUp)   && i.modifiers.ctrl);
         let ctrl_right = ctx.input(|i| i.key_pressed(Key::PageDown) && i.modifiers.ctrl);
-        let page_up    = ctx.input(|i| i.key_pressed(Key::PageUp)   && !i.modifiers.ctrl);
-        let page_down  = ctx.input(|i| i.key_pressed(Key::PageDown) && !i.modifiers.ctrl);
+        let page_up    = ctx.input(|i| i.key_pressed(Key::PageUp)    && !i.modifiers.ctrl);
+        let page_down  = ctx.input(|i| i.key_pressed(Key::PageDown)  && !i.modifiers.ctrl);
+        let arrow_up   = ctx.input(|i| i.key_pressed(Key::ArrowUp)   && i.modifiers.is_none());
+        let arrow_down = ctx.input(|i| i.key_pressed(Key::ArrowDown)  && i.modifiers.is_none());
         let page_scroll: f32 = if page_up { 1.0 } else if page_down { -1.0 } else { 0.0 };
+        // Arrow scroll fraction — positive = up, negative = down.  0.15 ≈ one line.
+        let arrow_scroll: f32 = if arrow_up { 0.15 } else if arrow_down { -0.15 } else { 0.0 };
         let escape     = ctx.input(|i| i.key_pressed(Key::Escape));
         let enter      = ctx.input(|i| i.key_pressed(Key::Enter) && !i.modifiers.shift);
         let shift_enter= ctx.input(|i| i.key_pressed(Key::Enter) &&  i.modifiers.shift);
@@ -1060,7 +1064,7 @@ impl eframe::App for App {
                         let sq   = self.search_query.as_str();
                         let sc   = self.search_current;
                         let opts = SearchOpts { case_sensitive: self.search_case_sensitive, whole_word: self.search_whole_word };
-                        render_preview(ui, &tab.parsed_doc, &tab.buffer, scroll_to, page_scroll, "preview", &mut self.highlighter, sq, sc, opts);
+                        render_preview(ui, &tab.parsed_doc, &tab.buffer, scroll_to, page_scroll + arrow_scroll, "preview", &mut self.highlighter, sq, sc, opts);
                     }
                     ViewMode::Edit => {
                         let sm   = self.search_matches.as_slice();
@@ -1154,7 +1158,7 @@ impl eframe::App for App {
                         // Only scroll the pane the pointer is hovering over (mirrors mouse-wheel behaviour).
                         let pointer = ctx.pointer_latest_pos();
                         let left_scroll  = if pointer.map_or(false, |p| left_rect.contains(p))  { page_scroll } else { 0.0 };
-                        let right_scroll = if pointer.map_or(false, |p| right_rect.contains(p)) { page_scroll } else { 0.0 };
+                        let right_scroll = if pointer.map_or(false, |p| right_rect.contains(p)) { page_scroll + arrow_scroll } else { 0.0 };
 
                         // Render editor and preview as bounded children
                         let mut left_ui = ui.new_child(egui::UiBuilder::new().max_rect(left_rect));
@@ -1308,16 +1312,15 @@ fn render_preview(
         .show(ui, |ui| {
             if page_scroll != 0.0 {
                 let clip = ui.clip_rect();
+                let d = page_scroll.abs() * clip.height();
                 if page_scroll > 0.0 {
-                    // PageUp: scroll up one page
                     ui.scroll_to_rect(
-                        egui::Rect::from_x_y_ranges(clip.x_range(), clip.min.y - 1.0..=clip.min.y),
+                        egui::Rect::from_x_y_ranges(clip.x_range(), (clip.max.y - d - 1.0)..=(clip.max.y - d)),
                         Some(egui::Align::BOTTOM),
                     );
                 } else {
-                    // PageDown: scroll down one page
                     ui.scroll_to_rect(
-                        egui::Rect::from_x_y_ranges(clip.x_range(), clip.max.y..=clip.max.y + 1.0),
+                        egui::Rect::from_x_y_ranges(clip.x_range(), (clip.min.y + d)..=(clip.min.y + d + 1.0)),
                         Some(egui::Align::TOP),
                     );
                 }

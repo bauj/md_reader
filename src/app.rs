@@ -123,6 +123,9 @@ pub struct App {
 
     // Zoom level applied to editor/preview content only (default 1.0).
     content_zoom: f32,
+
+    // Whether the file-tree sidebar is visible.
+    sidebar_open: bool,
 }
 
 impl Default for App {
@@ -161,6 +164,7 @@ impl App {
             split_ratio:          state.split_ratio.unwrap_or(0.5),
             recalc_sidebar_width: false,
             content_zoom:         1.0,
+            sidebar_open:         true,
         };
 
         if let Some(path) = initial_path {
@@ -480,6 +484,7 @@ impl eframe::App for App {
         let ctrl_w     = ctx.input(|i| i.key_pressed(Key::W)        && i.modifiers.ctrl);
         let ctrl_n     = ctx.input(|i| i.key_pressed(Key::N)        && i.modifiers.ctrl);
         let ctrl_q     = ctx.input(|i| i.key_pressed(Key::Q)        && i.modifiers.ctrl);
+        let ctrl_b     = ctx.input(|i| i.key_pressed(Key::B)        && i.modifiers.ctrl);
         let ctrl_f     = ctx.input(|i| i.key_pressed(Key::F)        && i.modifiers.ctrl);
         let ctrl_left  = ctx.input(|i| i.key_pressed(Key::PageUp)   && i.modifiers.ctrl);
         let ctrl_right = ctx.input(|i| i.key_pressed(Key::PageDown) && i.modifiers.ctrl);
@@ -494,6 +499,7 @@ impl eframe::App for App {
         let enter      = ctx.input(|i| i.key_pressed(Key::Enter) && !i.modifiers.shift);
         let shift_enter= ctx.input(|i| i.key_pressed(Key::Enter) &&  i.modifiers.shift);
 
+        if ctrl_b { self.sidebar_open = !self.sidebar_open; }
         if ctrl_s { self.save_active(); }
         if ctrl_w {
             if let Some(idx) = self.active_tab {
@@ -738,6 +744,14 @@ impl eframe::App for App {
                 .inner_margin(egui::Margin::symmetric(8, 4)))
             .show(ctx, |ui| {
             ui.horizontal(|ui| {
+                let sidebar_icon = if self.sidebar_open { "«" } else { "»" };
+                let sidebar_tip  = if self.sidebar_open { "Hide sidebar (Ctrl+B)" } else { "Show sidebar (Ctrl+B)" };
+                if ui.button(sidebar_icon).on_hover_text(sidebar_tip).clicked() {
+                    self.sidebar_open = !self.sidebar_open;
+                }
+
+                ui.separator();
+
                 if ui.button("Open Folder").on_hover_text("Open a folder in the sidebar").clicked() {
                     if let Some(path) = rfd::FileDialog::new().pick_folder() {
                         self.add_root(path);
@@ -945,6 +959,9 @@ impl eframe::App for App {
         }
 
         // ── Sidebar ───────────────────────────────────────────────────────
+        // ── Sidebar panel ─────────────────────────────────────────────────
+        if self.sidebar_open {
+
         // Fit width to the longest visible label when a new root is added.
         if self.recalc_sidebar_width {
             self.recalc_sidebar_width = false;
@@ -1095,6 +1112,8 @@ impl eframe::App for App {
                 }
             });
         });
+
+        } // end sidebar_open
 
         // ── Central panel ─────────────────────────────────────────────────
         let scroll_to   = self.scroll_to_block.take();

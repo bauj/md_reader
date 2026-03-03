@@ -20,6 +20,7 @@ pub enum Block {
 pub struct ListItem {
     pub inlines:  Vec<Inline>,
     pub children: Vec<Block>,   // nested sub-lists
+    pub checked:  Option<bool>, // Some(true/false) for task list items, None for regular
 }
 
 #[derive(Clone, Debug)]
@@ -36,6 +37,7 @@ pub enum Inline {
 pub fn parse_markdown(text: &str) -> ParsedDoc {
     let mut opts = Options::empty();
     opts.insert(Options::ENABLE_TABLES);
+    opts.insert(Options::ENABLE_TASKLISTS);
 
     let parser = Parser::new_ext(text, opts);
 
@@ -59,6 +61,7 @@ pub fn parse_markdown(text: &str) -> ParsedDoc {
         items:         Vec<ListItem>,
         item_children: Vec<Block>,  // sub-blocks for the item currently being parsed
         item_inlines:  Vec<Inline>, // parent item's inlines saved when a sub-list starts
+        item_checked:  Option<bool>, // task list marker for the current item being parsed
     }
     let mut list_stack: Vec<ListFrame> = Vec::new();
 
@@ -111,6 +114,7 @@ pub fn parse_markdown(text: &str) -> ParsedDoc {
                     items:         Vec::new(),
                     item_children: Vec::new(),
                     item_inlines:  saved,
+                    item_checked:  None,
                 });
             }
             Event::Start(Tag::Item) => {
@@ -167,6 +171,7 @@ pub fn parse_markdown(text: &str) -> ParsedDoc {
                     frame.items.push(ListItem {
                         inlines:  std::mem::take(&mut current_inlines),
                         children,
+                        checked:  frame.item_checked.take(),
                     });
                 }
                 ctx = Ctx::None;
@@ -261,6 +266,12 @@ pub fn parse_markdown(text: &str) -> ParsedDoc {
                 if let Some(url) = link_url.take() {
                     let alt_text = std::mem::take(&mut link_text);
                     current_inlines.push(Inline::Image(url, alt_text));
+                }
+            }
+
+            Event::TaskListMarker(checked) => {
+                if let Some(frame) = list_stack.last_mut() {
+                    frame.item_checked = Some(checked);
                 }
             }
 

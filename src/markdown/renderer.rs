@@ -13,14 +13,17 @@ pub fn render_markdown(
     search_query:   &str,
     search_current: usize,
     opts:           SearchOpts,
-) {
+) -> Option<usize> {
     // Capture content width ONCE before any block renders.
     // At this point max_rect still reflects the original content_rect from render_preview.
     // We use this to give every block a fresh bounded max_rect so that overflow from
     // one block cannot grow available_width() for subsequent blocks.
     let content_w = ui.max_rect().width();
 
-    let mut occurrence = 0usize;
+    let mut occurrence  = 0usize;
+    let mut task_occ    = 0usize;
+    let mut toggled: Option<usize> = None;
+
     for (i, block) in doc.blocks.iter().enumerate() {
         let cursor = ui.cursor();
         let block_rect = egui::Rect::from_min_size(
@@ -42,7 +45,7 @@ pub fn render_markdown(
             block_ui.scroll_to_cursor(Some(egui::Align::TOP));
         }
 
-        render_block(&mut block_ui, block, hl, search_query, search_current, opts, &mut occurrence);
+        render_block(&mut block_ui, block, hl, search_query, search_current, opts, &mut occurrence, &mut task_occ, &mut toggled);
 
         // Advance the parent cursor: full rendered height, width clamped to content_w.
         // This prevents layout overflow from ever reaching the parent UI.
@@ -55,6 +58,8 @@ pub fn render_markdown(
 
         ui.add_space(12.0);
     }
+
+    toggled
 }
 
 fn render_block(
@@ -65,6 +70,8 @@ fn render_block(
     search_current: usize,
     opts:           SearchOpts,
     occurrence:     &mut usize,
+    task_occ:       &mut usize,
+    toggled:        &mut Option<usize>,
 ) {
     match block {
         Block::Heading(level, inlines) => {
@@ -233,23 +240,33 @@ fn render_block(
 
         Block::List(ordered, items) => {
             for (i, item) in items.iter().enumerate() {
+                // ── Header row: bullet/checkbox + inline text only ─────────
+                // Keeping children out of this row prevents the checkbox from
+                // being vertically centered across the full item height.
                 ui.horizontal(|ui| {
                     ui.add_space(20.0);
 
-                    let bullet = if *ordered {
-                        format!("{}. ", i + 1)
+                    if let Some(checked) = item.checked {
+                        let my_occ = *task_occ;
+                        *task_occ += 1;
+                        let mut val = checked;
+                        if ui.checkbox(&mut val, "").changed() {
+                            *toggled = Some(my_occ);
+                        }
                     } else {
-                        "• ".to_string()
-                    };
-                    ui.label(
-                        RichText::new(bullet)
-                            .size(16.0)
-                            .color(ui.visuals().weak_text_color()),
-                    );
-                    ui.add_space(4.0);
+                        let bullet = if *ordered {
+                            format!("{}. ", i + 1)
+                        } else {
+                            "• ".to_string()
+                        };
+                        ui.label(
+                            RichText::new(bullet)
+                                .size(16.0)
+                                .color(ui.visuals().weak_text_color()),
+                        );
+                        ui.add_space(4.0);
+                    }
 
-                    // Render content in a vertical column so long items wrap within
-                    // the remaining width instead of overflowing to the right.
                     ui.vertical(|ui| {
                         if !item.inlines.is_empty() {
                             ui.horizontal_wrapped(|ui| {
@@ -259,11 +276,21 @@ fn render_block(
                                 }
                             });
                         }
-                        for child in &item.children {
-                            render_block(ui, child, hl, search_query, search_current, opts, occurrence);
-                        }
                     });
                 });
+
+                // ── Children (sub-lists etc.) indented below ───────────────
+                if !item.children.is_empty() {
+                    ui.horizontal(|ui| {
+                        ui.add_space(36.0);
+                        ui.vertical(|ui| {
+                            for child in &item.children {
+                                render_block(ui, child, hl, search_query, search_current, opts, occurrence, task_occ, toggled);
+                            }
+                        });
+                    });
+                }
+
                 ui.add_space(4.0);
             }
         }

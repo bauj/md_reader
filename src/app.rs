@@ -1060,11 +1060,18 @@ impl eframe::App for App {
                 Some(idx) => match self.view_mode {
                     ViewMode::Preview => {
                         self.cursor_pos = None;
-                        let tab  = &self.tabs[idx];
-                        let sq   = self.search_query.as_str();
-                        let sc   = self.search_current;
-                        let opts = SearchOpts { case_sensitive: self.search_case_sensitive, whole_word: self.search_whole_word };
-                        render_preview(ui, &tab.parsed_doc, &tab.buffer, scroll_to, page_scroll + arrow_scroll, "preview", &mut self.highlighter, sq, sc, opts);
+                        let toggled = {
+                            let tab  = &self.tabs[idx];
+                            let sq   = self.search_query.as_str();
+                            let sc   = self.search_current;
+                            let opts = SearchOpts { case_sensitive: self.search_case_sensitive, whole_word: self.search_whole_word };
+                            render_preview(ui, &tab.parsed_doc, &tab.buffer, scroll_to, page_scroll + arrow_scroll, "preview", &mut self.highlighter, sq, sc, opts)
+                        };
+                        if let Some(task_idx) = toggled {
+                            toggle_task_in_buffer(&mut self.tabs[idx].buffer, task_idx);
+                            self.tabs[idx].needs_reparse = true;
+                            let _ = std::fs::write(&self.tabs[idx].path, &self.tabs[idx].buffer);
+                        }
                     }
                     ViewMode::Edit => {
                         let sm   = self.search_matches.as_slice();
@@ -1177,7 +1184,7 @@ impl eframe::App for App {
                         );
 
                         let mut right_ui = ui.new_child(egui::UiBuilder::new().max_rect(right_rect));
-                        render_preview(
+                        let preview_toggled = render_preview(
                             &mut right_ui,
                             &tab.parsed_doc,
                             &tab.buffer,
@@ -1189,6 +1196,11 @@ impl eframe::App for App {
                             sc,
                             opts,
                         );
+                        if let Some(task_idx) = preview_toggled {
+                            toggle_task_in_buffer(&mut tab.buffer, task_idx);
+                            tab.needs_reparse = true;
+                            let _ = std::fs::write(&tab.path, &tab.buffer);
+                        }
 
                         // Advance parent cursor to cover the full area we occupied
                         ui.advance_cursor_after_rect(available);
@@ -1297,7 +1309,7 @@ fn render_preview(
     search_query:   &str,
     search_current: usize,
     opts:           SearchOpts,
-) {
+) -> Option<usize> {
     // Measure from max_rect, which correctly reflects the column width in split mode.
     // clip_rect() would return the parent panel's full width because ui.columns() does
     // not narrow the clip rect — only max_rect is set to the column's allocated rect.
@@ -1338,14 +1350,17 @@ fn render_preview(
             // Hard-clip painting to content_rect so nothing renders outside the column.
             child_ui.shrink_clip_rect(content_rect);
 
-            if let Some(doc) = doc {
+            let toggled = if let Some(doc) = doc {
                 crate::markdown::render_markdown(
                     &mut child_ui, doc, scroll_to, hl,
                     search_query, search_current, opts,
-                );
-            } else if !buffer.is_empty() {
-                child_ui.label("Failed to parse markdown.");
-            }
+                )
+            } else {
+                if !buffer.is_empty() {
+                    child_ui.label("Failed to parse markdown.");
+                }
+                None
+            };
 
             // Advance the parent cursor using the child's actual height but clamping
             // max.x to content_rect.max.x — this prevents any layout overflow from
@@ -1358,7 +1373,10 @@ fn render_preview(
             ui.advance_cursor_after_rect(clamped);
 
             ui.add_space(32.0);
-        });
+
+            toggled
+        })
+        .inner
 }
 
 /// Returns the current cursor position as `Some((line, col))` (both 1-indexed)
@@ -1939,5 +1957,64 @@ fn make_token_colors(theme: &crate::theme::Theme) -> crate::markdown::editor_hig
         list_marker:    theme.fg_muted,
         blockquote:     theme.fg_muted,
         hr:             theme.separator,
+    }
+}
+
+/// Toggle the nth task list checkbox in `buffer` (0-indexed).
+/// Matches lines of the form: optional whitespace + list marker + `[ ]` or `[x]`.
+fn toggle_task_in_buffer(buffer: &mut String, index: usize) {
+    let mut count   = 0usize;
+    let mut byte_pos = 0usize;
+
+    // Iterate over lines without allocating a Vec
+    let mut rest = buffer.as_str();
+    while !rest.is_empty() {
+        let (line, remainder) = match rest.find('\n') {
+            Some(i) => (&rest[..i], &rest[i + 1..]),
+            None    => (rest, ""),
+        };
+
+        if let Some(cb_off) = task_checkbox_offset(line) {
+            if count == index {
+                let abs = byte_pos + cb_off + 1; // +1: skip '[', point at ' ' or 'x'
+                let new_ch = if buffer.as_bytes()[abs] == b' ' { 'x' } else { ' ' };
+                buffer.replace_range(abs..abs + 1, &new_ch.to_string());
+                return;
+            }
+            count += 1;
+        }
+
+        byte_pos += line.len() + 1;
+        rest = remainder;
+    }
+}
+
+/// Returns the byte offset of `[` within `line` if the line is a task list item, else `None`.
+fn task_checkbox_offset(line: &str) -> Option<usize> {
+    let rest = line.trim_start();
+    let indent = line.len() - rest.len();
+
+    // Unordered: `- `, `* `, `+ `
+    let after_marker = if rest.starts_with("- ") || rest.starts_with("* ") || rest.starts_with("+ ") {
+        &rest[2..]
+    } else {
+        // Ordered: one or more digits followed by `. ` or `) `
+        let digits_end = rest.find(|c: char| !c.is_ascii_digit()).unwrap_or(0);
+        if digits_end > 0 {
+            let after = &rest[digits_end..];
+            if after.starts_with(". ") || after.starts_with(") ") {
+                &after[2..]
+            } else {
+                return None;
+            }
+        } else {
+            return None;
+        }
+    };
+
+    if after_marker.starts_with("[ ]") || after_marker.starts_with("[x]") || after_marker.starts_with("[X]") {
+        Some(indent + (rest.len() - after_marker.len()))
+    } else {
+        None
     }
 }

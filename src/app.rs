@@ -66,6 +66,10 @@ pub struct OpenTab {
     needs_reparse: bool,
     /// File was changed on disk while we have unsaved local edits.
     extern_modified: bool,
+    /// Last known scroll offset (px) for the editor pane (Edit / Split-left).
+    editor_scroll_y: f32,
+    /// Last known scroll offset (px) for the preview pane (Preview / Split-right).
+    preview_scroll_y: f32,
 }
 
 pub struct App {
@@ -325,6 +329,8 @@ impl App {
                     parsed_doc:      None,
                     needs_reparse:   true,
                     extern_modified: false,
+                    editor_scroll_y:  0.0,
+                    preview_scroll_y: 0.0,
                 });
                 self.active_tab = Some(self.tabs.len() - 1);
             }
@@ -1048,7 +1054,11 @@ impl eframe::App for App {
         });
 
         // ── Central panel ─────────────────────────────────────────────────
-        let scroll_to = self.scroll_to_block.take();
+        let scroll_to   = self.scroll_to_block.take();
+        // On mode switch, apply the stored pane offset so the new mode opens at the
+        // same position as its counterpart. vertical_scroll_offset() overrides egui's
+        // stored state for that single frame; normal scrolling resumes immediately after.
+        let mode_switched = mode_before != self.view_mode;
         CentralPanel::default().show(ctx, |ui| {
             match self.active_tab {
                 None => {
@@ -1060,13 +1070,15 @@ impl eframe::App for App {
                 Some(idx) => match self.view_mode {
                     ViewMode::Preview => {
                         self.cursor_pos = None;
-                        let toggled = {
+                        let sync = mode_switched.then(|| self.tabs[idx].preview_scroll_y);
+                        let (toggled, offset) = {
                             let tab  = &self.tabs[idx];
                             let sq   = self.search_query.as_str();
                             let sc   = self.search_current;
                             let opts = SearchOpts { case_sensitive: self.search_case_sensitive, whole_word: self.search_whole_word };
-                            render_preview(ui, &tab.parsed_doc, &tab.buffer, scroll_to, page_scroll + arrow_scroll, "preview", &mut self.highlighter, sq, sc, opts)
+                            render_preview(ui, &tab.parsed_doc, &tab.buffer, scroll_to, page_scroll + arrow_scroll, "preview", &mut self.highlighter, sq, sc, opts, sync)
                         };
+                        self.tabs[idx].preview_scroll_y = offset;
                         if let Some(task_idx) = toggled {
                             toggle_task_in_buffer(&mut self.tabs[idx].buffer, task_idx);
                             self.tabs[idx].needs_reparse = true;
@@ -1079,6 +1091,7 @@ impl eframe::App for App {
                         let ql   = needle_len(&self.search_query, opts);
                         let sc   = self.search_current;
                         let tc   = make_token_colors(theme);
+                        let sync = mode_switched.then(|| self.tabs[idx].editor_scroll_y);
                         // Outline click: convert block index → raw buffer byte offset.
                         let outline_sto = scroll_to.and_then(|bi| {
                             let tab = &self.tabs[idx];
@@ -1090,8 +1103,9 @@ impl eframe::App for App {
                         let buffer_changed = {
                             let tab = &mut self.tabs[idx];
                             let before = tab.needs_reparse;
-                            let cpos = render_editor(ui, &mut tab.buffer, &mut tab.modified, &mut tab.needs_reparse, "editor", sm, ql, sc, sto, page_scroll, tc);
+                            let (cpos, offset) = render_editor(ui, &mut tab.buffer, &mut tab.modified, &mut tab.needs_reparse, "editor", sm, ql, sc, sto, page_scroll, tc, sync);
                             self.cursor_pos = cpos;
+                            tab.editor_scroll_y = offset;
                             !before && tab.needs_reparse
                         };
                         // Keep search_matches in sync if the buffer was edited this frame.
@@ -1167,9 +1181,13 @@ impl eframe::App for App {
                         let left_scroll  = if pointer.map_or(false, |p| left_rect.contains(p))  { page_scroll } else { 0.0 };
                         let right_scroll = if pointer.map_or(false, |p| right_rect.contains(p)) { page_scroll + arrow_scroll } else { 0.0 };
 
-                        // Render editor and preview as bounded children
+                        // Render editor and preview as bounded children.
+                        // On mode switch, restore each pane's last known position.
+                        let editor_sync  = mode_switched.then(|| tab.editor_scroll_y);
+                        let preview_sync = mode_switched.then(|| tab.preview_scroll_y);
+
                         let mut left_ui = ui.new_child(egui::UiBuilder::new().max_rect(left_rect));
-                        split_cursor = render_editor(
+                        let (ecursor, eoffset) = render_editor(
                             &mut left_ui,
                             &mut tab.buffer,
                             &mut tab.modified,
@@ -1181,10 +1199,13 @@ impl eframe::App for App {
                             sto,
                             left_scroll,
                             tc,
+                            editor_sync,
                         );
+                        split_cursor = ecursor;
+                        tab.editor_scroll_y = eoffset;
 
                         let mut right_ui = ui.new_child(egui::UiBuilder::new().max_rect(right_rect));
-                        let preview_toggled = render_preview(
+                        let (preview_toggled, poffset) = render_preview(
                             &mut right_ui,
                             &tab.parsed_doc,
                             &tab.buffer,
@@ -1195,7 +1216,9 @@ impl eframe::App for App {
                             &sq,
                             sc,
                             opts,
+                            preview_sync,
                         );
+                        tab.preview_scroll_y = poffset;
                         if let Some(task_idx) = preview_toggled {
                             toggle_task_in_buffer(&mut tab.buffer, task_idx);
                             tab.needs_reparse = true;
@@ -1309,7 +1332,8 @@ fn render_preview(
     search_query:   &str,
     search_current: usize,
     opts:           SearchOpts,
-) -> Option<usize> {
+    sync_scroll:    Option<f32>,
+) -> (Option<usize>, f32) {
     // Measure from max_rect, which correctly reflects the column width in split mode.
     // clip_rect() would return the parent panel's full width because ui.columns() does
     // not narrow the clip rect — only max_rect is set to the column's allocated rect.
@@ -1318,10 +1342,11 @@ fn render_preview(
     let content_w  = (viewport_w - 48.0).min(820.0).max(200.0);
     let side_pad   = ((viewport_w - content_w) / 2.0).max(24.0);
 
-    ScrollArea::vertical()
+    let mut sa = ScrollArea::vertical()
         .id_salt(id)
-        .auto_shrink([false, false])
-        .show(ui, |ui| {
+        .auto_shrink([false, false]);
+    if let Some(y) = sync_scroll { sa = sa.vertical_scroll_offset(y); }
+    let out = sa.show(ui, |ui| {
             if page_scroll != 0.0 {
                 let clip = ui.clip_rect();
                 let d = page_scroll.abs() * clip.height();
@@ -1375,8 +1400,8 @@ fn render_preview(
             ui.add_space(32.0);
 
             toggled
-        })
-        .inner
+        });
+    (out.inner, out.state.offset.y)
 }
 
 /// Returns the current cursor position as `Some((line, col))` (both 1-indexed)
@@ -1508,7 +1533,8 @@ fn render_editor(
     scroll_to_offset: Option<usize>,
     page_scroll:      f32,
     token_colors:     crate::markdown::editor_highlight::TokenColors,
-) -> Option<(usize, usize)> {
+    sync_scroll:      Option<f32>,
+) -> (Option<(usize, usize)>, f32) {
     let te_id = egui::Id::new(id).with("te");
     // Drain ALL Tab key-press events from the queue before any widget sees them.
     // consume_key() modifiers matching can be unreliable (Shift+Tab vs Tab), so
@@ -1528,10 +1554,11 @@ fn render_editor(
     });
 
     let mut cursor_out: Option<(usize, usize)> = None;
-    ScrollArea::vertical()
+    let mut sa = ScrollArea::vertical()
         .id_salt(id)
-        .auto_shrink([false; 2])
-        .show(ui, |ui| {
+        .auto_shrink([false; 2]);
+    if let Some(y) = sync_scroll { sa = sa.vertical_scroll_offset(y); }
+    let scroll_out = sa.show(ui, |ui| {
             if page_scroll != 0.0 {
                 let clip = ui.clip_rect();
                 if page_scroll > 0.0 {
@@ -1676,7 +1703,7 @@ fn render_editor(
                 r.primary.rcursor.column + 1,
             ));
         });
-    cursor_out
+    (cursor_out, scroll_out.state.offset.y)
 }
 
 // ── Search helpers ────────────────────────────────────────────────────────────

@@ -13,19 +13,32 @@ pub fn render_markdown(
     search_query:   &str,
     search_current: usize,
     opts:           SearchOpts,
-) -> Option<usize> {
+) -> (Option<usize>, Vec<(usize, f32)>) {
     // Capture content width ONCE before any block renders.
     // At this point max_rect still reflects the original content_rect from render_preview.
     // We use this to give every block a fresh bounded max_rect so that overflow from
     // one block cannot grow available_width() for subsequent blocks.
     let content_w = ui.max_rect().width();
 
-    let mut occurrence  = 0usize;
-    let mut task_occ    = 0usize;
-    let mut toggled: Option<usize> = None;
+    let mut occurrence        = 0usize;
+    let mut task_occ          = 0usize;
+    let mut toggled:           Option<usize>      = None;
+    let mut initial_y:         Option<f32>        = None;
+    let mut heading_positions: Vec<(usize, f32)>  = Vec::new();
 
     for (i, block) in doc.blocks.iter().enumerate() {
         let cursor = ui.cursor();
+        let iy = *initial_y.get_or_insert(cursor.min.y);
+
+        // Only track headings that appear in the outline (level <= 3).
+        if let Block::Heading(level, _) = block {
+            if *level <= 3 {
+                // Store content position relative to start of first block.
+                // This is stable across scroll frames.
+                heading_positions.push((i, cursor.min.y - iy));
+            }
+        }
+
         let block_rect = egui::Rect::from_min_size(
             cursor.min,
             egui::vec2(content_w, 200_000.0),
@@ -59,7 +72,7 @@ pub fn render_markdown(
         ui.add_space(12.0);
     }
 
-    toggled
+    (toggled, heading_positions)
 }
 
 fn render_block(

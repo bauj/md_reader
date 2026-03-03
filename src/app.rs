@@ -70,6 +70,13 @@ pub struct OpenTab {
     editor_scroll_y: f32,
     /// Last known scroll offset (px) for the preview pane (Preview / Split-right).
     preview_scroll_y: f32,
+    /// Content-relative Y position for each heading block (block_idx, content_y).
+    /// Updated each render; used to derive the active outline entry from scroll offset.
+    heading_positions: Vec<(usize, f32)>,
+    /// Last active outline block; used to detect when highlight changes (for auto-scroll).
+    last_active_outline_block: Option<usize>,
+    /// Whether the preview is scrolled to the bottom of the document.
+    preview_at_bottom: bool,
 }
 
 pub struct App {
@@ -329,8 +336,11 @@ impl App {
                     parsed_doc:      None,
                     needs_reparse:   true,
                     extern_modified: false,
-                    editor_scroll_y:  0.0,
-                    preview_scroll_y: 0.0,
+                    editor_scroll_y:     0.0,
+                    preview_scroll_y:    0.0,
+                    heading_positions: Vec::new(),
+                    last_active_outline_block: None,
+                    preview_at_bottom: false,
                 });
                 self.active_tab = Some(self.tabs.len() - 1);
             }
@@ -1016,15 +1026,30 @@ impl eframe::App for App {
                         if has_doc {
                             let idx = self.active_tab.unwrap();
                             let doc = self.tabs[idx].parsed_doc.as_ref().unwrap();
+                            let active_blk = self.active_tab.and_then(|i| {
+                                let tab = &self.tabs[i];
+                                if tab.preview_at_bottom && !tab.heading_positions.is_empty() {
+                                    tab.heading_positions.last().map(|(idx, _)| *idx)
+                                } else {
+                                    tab.heading_positions.iter()
+                                        .filter(|(_, y)| *y <= tab.preview_scroll_y)
+                                        .last()
+                                        .map(|(idx, _)| *idx)
+                                }
+                            });
+                            let last_active = self.tabs[idx].last_active_outline_block;
                             if let Some(block_idx) = render_outline(
                                 ui,
                                 doc,
                                 &mut self.outline_open,
                                 &mut self.outline_collapsed,
                                 theme.sidebar_active,
+                                active_blk,
+                                last_active,
                             ) {
                                 self.scroll_to_block = Some(block_idx);
                             }
+                            self.tabs[idx].last_active_outline_block = active_blk;
                         }
                     });
             });
@@ -1071,14 +1096,16 @@ impl eframe::App for App {
                     ViewMode::Preview => {
                         self.cursor_pos = None;
                         let sync = mode_switched.then(|| self.tabs[idx].preview_scroll_y);
-                        let (toggled, offset) = {
+                        let (toggled, offset, heading_positions, at_bottom) = {
                             let tab  = &self.tabs[idx];
                             let sq   = self.search_query.as_str();
                             let sc   = self.search_current;
                             let opts = SearchOpts { case_sensitive: self.search_case_sensitive, whole_word: self.search_whole_word };
-                            render_preview(ui, &tab.parsed_doc, &tab.buffer, scroll_to, page_scroll + arrow_scroll, "preview", &mut self.highlighter, sq, sc, opts, sync)
+                            render_preview(ui, &tab.parsed_doc, &tab.buffer, scroll_to, page_scroll + arrow_scroll, &format!("preview_{idx}"), &mut self.highlighter, sq, sc, opts, sync)
                         };
                         self.tabs[idx].preview_scroll_y = offset;
+                        self.tabs[idx].heading_positions = heading_positions;
+                        self.tabs[idx].preview_at_bottom = at_bottom;
                         if let Some(task_idx) = toggled {
                             toggle_task_in_buffer(&mut self.tabs[idx].buffer, task_idx);
                             self.tabs[idx].needs_reparse = true;
@@ -1103,7 +1130,7 @@ impl eframe::App for App {
                         let buffer_changed = {
                             let tab = &mut self.tabs[idx];
                             let before = tab.needs_reparse;
-                            let (cpos, offset) = render_editor(ui, &mut tab.buffer, &mut tab.modified, &mut tab.needs_reparse, "editor", sm, ql, sc, sto, page_scroll, tc, sync);
+                            let (cpos, offset) = render_editor(ui, &mut tab.buffer, &mut tab.modified, &mut tab.needs_reparse, &format!("editor_{idx}"), sm, ql, sc, sto, page_scroll, tc, sync);
                             self.cursor_pos = cpos;
                             tab.editor_scroll_y = offset;
                             !before && tab.needs_reparse
@@ -1192,7 +1219,7 @@ impl eframe::App for App {
                             &mut tab.buffer,
                             &mut tab.modified,
                             &mut tab.needs_reparse,
-                            "split_editor",
+                            &format!("split_editor_{idx}"),
                             &sm,
                             ql,
                             sc,
@@ -1205,13 +1232,13 @@ impl eframe::App for App {
                         tab.editor_scroll_y = eoffset;
 
                         let mut right_ui = ui.new_child(egui::UiBuilder::new().max_rect(right_rect));
-                        let (preview_toggled, poffset) = render_preview(
+                        let (preview_toggled, poffset, preview_heading_positions, preview_at_bottom) = render_preview(
                             &mut right_ui,
                             &tab.parsed_doc,
                             &tab.buffer,
                             scroll_to,
                             right_scroll,
-                            "split_preview",
+                            &format!("split_preview_{idx}"),
                             hl,
                             &sq,
                             sc,
@@ -1219,6 +1246,8 @@ impl eframe::App for App {
                             preview_sync,
                         );
                         tab.preview_scroll_y = poffset;
+                        tab.heading_positions = preview_heading_positions;
+                        tab.preview_at_bottom = preview_at_bottom;
                         if let Some(task_idx) = preview_toggled {
                             toggle_task_in_buffer(&mut tab.buffer, task_idx);
                             tab.needs_reparse = true;
@@ -1333,7 +1362,7 @@ fn render_preview(
     search_current: usize,
     opts:           SearchOpts,
     sync_scroll:    Option<f32>,
-) -> (Option<usize>, f32) {
+) -> (Option<usize>, f32, Vec<(usize, f32)>, bool) {
     // Measure from max_rect, which correctly reflects the column width in split mode.
     // clip_rect() would return the parent panel's full width because ui.columns() does
     // not narrow the clip rect — only max_rect is set to the column's allocated rect.
@@ -1375,7 +1404,7 @@ fn render_preview(
             // Hard-clip painting to content_rect so nothing renders outside the column.
             child_ui.shrink_clip_rect(content_rect);
 
-            let toggled = if let Some(doc) = doc {
+            let (toggled, positions) = if let Some(doc) = doc {
                 crate::markdown::render_markdown(
                     &mut child_ui, doc, scroll_to, hl,
                     search_query, search_current, opts,
@@ -1384,7 +1413,7 @@ fn render_preview(
                 if !buffer.is_empty() {
                     child_ui.label("Failed to parse markdown.");
                 }
-                None
+                (None, Vec::new())
             };
 
             // Advance the parent cursor using the child's actual height but clamping
@@ -1399,9 +1428,11 @@ fn render_preview(
 
             ui.add_space(32.0);
 
-            toggled
+            (toggled, positions)
         });
-    (out.inner, out.state.offset.y)
+    let is_at_bottom = out.content_size.y > 0.0
+        && out.state.offset.y + out.inner_rect.height() >= out.content_size.y - 1.0;
+    (out.inner.0, out.state.offset.y, out.inner.1, is_at_bottom)
 }
 
 /// Returns the current cursor position as `Some((line, col))` (both 1-indexed)

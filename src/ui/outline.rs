@@ -1,13 +1,15 @@
 use std::collections::HashSet;
-use egui::{Color32, Rect, RichText, Ui, vec2};
+use egui::{Color32, Rect, RichText, ScrollArea, Ui, vec2};
 use crate::markdown::{Block, Inline, ParsedDoc};
 
 pub fn render_outline(
-    ui:           &mut Ui,
-    doc:          &ParsedDoc,
-    open:         &mut bool,
-    collapsed:    &mut HashSet<usize>,
-    active_color: Color32,
+    ui:                &mut Ui,
+    doc:               &ParsedDoc,
+    open:              &mut bool,
+    collapsed:         &mut HashSet<usize>,
+    active_color:      Color32,
+    active_block:      Option<usize>,
+    last_active_block: Option<usize>,
 ) -> Option<usize> {
     let mut scroll_to = None;
 
@@ -88,6 +90,9 @@ pub fn render_outline(
 
     let mut skip_below: Option<u32> = None;
 
+    ScrollArea::vertical()
+        .auto_shrink([false; 2])
+        .show(ui, |ui| {
     for (i, (level, title, block_idx)) in headings.iter().enumerate() {
         if let Some(skip_level) = skip_below {
             if *level > skip_level {
@@ -120,7 +125,18 @@ pub fn render_outline(
         };
         if top_pad > 0.0 { ui.add_space(top_pad); }
 
-        let clicked = ui.horizontal(|ui| {
+        let is_active = active_block.map_or(false, |ab| ab == *block_idx);
+
+        // Auto-scroll to the active item only if it just changed (not on every frame).
+        // This gives priority to manual user scrolling of the outline.
+        if is_active && active_block != last_active_block {
+            ui.scroll_to_cursor(Some(egui::Align::Center));
+        }
+
+        // Reserve a painter slot before the row so the active highlight renders behind all widgets.
+        let active_shape_idx = ui.painter().add(egui::Shape::Noop);
+
+        let row_resp = ui.horizontal(|ui| {
             ui.add_space(indent);
 
             // Fold toggle
@@ -198,7 +214,23 @@ pub fn render_outline(
             }
 
             resp.clicked()
-        }).inner;
+        });
+
+        let clicked = row_resp.inner;
+
+        // Paint active heading highlight (behind widgets via the pre-allocated slot).
+        if is_active {
+            ui.painter().set(
+                active_shape_idx,
+                egui::Shape::rect_filled(
+                    row_resp.response.rect.expand2(egui::vec2(4.0, 0.0)),
+                    2.0,
+                    Color32::from_rgba_unmultiplied(
+                        active_color.r(), active_color.g(), active_color.b(), 35,
+                    ),
+                ),
+            );
+        }
 
         if clicked {
             scroll_to = Some(*block_idx);
@@ -209,7 +241,9 @@ pub fn render_outline(
         }
     }
 
-    ui.add_space(8.0);
+        ui.add_space(8.0);
+    });
+
     scroll_to
 }
 

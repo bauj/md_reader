@@ -120,6 +120,9 @@ pub struct App {
 
     // When true, sidebar width is re-fitted to the longest visible label next frame.
     recalc_sidebar_width: bool,
+
+    // Zoom level applied to editor/preview content only (default 1.0).
+    content_zoom: f32,
 }
 
 impl Default for App {
@@ -157,6 +160,7 @@ impl App {
             cursor_pos:           None,
             split_ratio:          state.split_ratio.unwrap_or(0.5),
             recalc_sidebar_width: false,
+            content_zoom:         1.0,
         };
 
         if let Some(path) = initial_path {
@@ -455,6 +459,20 @@ impl eframe::App for App {
         // ── Apply theme ────────────────────────────────────────────────────
         apply_theme(ctx, self.active_theme);
         let theme = crate::theme::theme_by_id(self.active_theme);
+
+        // ── Ctrl+Scroll zoom ──────────────────────────────────────────────
+        let ctrl_scroll = ctx.input(|i| {
+            if i.modifiers.ctrl {
+                i.raw_scroll_delta.y
+            } else {
+                0.0
+            }
+        });
+        if ctrl_scroll != 0.0 {
+            ctx.input_mut(|i| i.raw_scroll_delta.y = 0.0); // consume so it doesn't scroll content
+            let factor = if ctrl_scroll > 0.0 { 1.1_f32 } else { 1.0 / 1.1 };
+            self.content_zoom = (self.content_zoom * factor).clamp(0.4, 4.0);
+        }
 
         // ── Keyboard shortcuts ────────────────────────────────────────────
         let ctrl_s     = ctx.input(|i| i.key_pressed(Key::S)        && i.modifiers.ctrl);
@@ -1101,7 +1119,7 @@ impl eframe::App for App {
                             let sq   = self.search_query.as_str();
                             let sc   = self.search_current;
                             let opts = SearchOpts { case_sensitive: self.search_case_sensitive, whole_word: self.search_whole_word };
-                            render_preview(ui, &tab.parsed_doc, &tab.buffer, scroll_to, page_scroll + arrow_scroll, &format!("preview_{idx}"), &mut self.highlighter, sq, sc, opts, sync)
+                            render_preview(ui, &tab.parsed_doc, &tab.buffer, scroll_to, page_scroll + arrow_scroll, &format!("preview_{idx}"), &mut self.highlighter, sq, sc, opts, sync, self.content_zoom)
                         };
                         self.tabs[idx].preview_scroll_y = offset;
                         self.tabs[idx].heading_positions = heading_positions;
@@ -1130,7 +1148,7 @@ impl eframe::App for App {
                         let buffer_changed = {
                             let tab = &mut self.tabs[idx];
                             let before = tab.needs_reparse;
-                            let (cpos, offset) = render_editor(ui, &mut tab.buffer, &mut tab.modified, &mut tab.needs_reparse, &format!("editor_{idx}"), sm, ql, sc, sto, page_scroll, tc, sync);
+                            let (cpos, offset) = render_editor(ui, &mut tab.buffer, &mut tab.modified, &mut tab.needs_reparse, &format!("editor_{idx}"), sm, ql, sc, sto, page_scroll, tc, sync, self.content_zoom);
                             self.cursor_pos = cpos;
                             tab.editor_scroll_y = offset;
                             !before && tab.needs_reparse
@@ -1157,6 +1175,7 @@ impl eframe::App for App {
                         });
                         let sto  = self.search_scroll_to_offset.take().or(outline_sto);
                         let tc   = make_token_colors(theme);
+                        let zoom = self.content_zoom;
                         let tab  = &mut self.tabs[idx];
                         let hl   = &mut self.highlighter;
                         let mut split_cursor: Option<(usize, usize)> = None;
@@ -1227,6 +1246,7 @@ impl eframe::App for App {
                             left_scroll,
                             tc,
                             editor_sync,
+                            zoom,
                         );
                         split_cursor = ecursor;
                         tab.editor_scroll_y = eoffset;
@@ -1244,6 +1264,7 @@ impl eframe::App for App {
                             sc,
                             opts,
                             preview_sync,
+                            zoom,
                         );
                         tab.preview_scroll_y = poffset;
                         tab.heading_positions = preview_heading_positions;
@@ -1362,6 +1383,7 @@ fn render_preview(
     search_current: usize,
     opts:           SearchOpts,
     sync_scroll:    Option<f32>,
+    zoom:           f32,
 ) -> (Option<usize>, f32, Vec<(usize, f32)>, bool) {
     // Measure from max_rect, which correctly reflects the column width in split mode.
     // clip_rect() would return the parent panel's full width because ui.columns() does
@@ -1407,7 +1429,7 @@ fn render_preview(
             let (toggled, positions) = if let Some(doc) = doc {
                 crate::markdown::render_markdown(
                     &mut child_ui, doc, scroll_to, hl,
-                    search_query, search_current, opts,
+                    search_query, search_current, opts, zoom,
                 )
             } else {
                 if !buffer.is_empty() {
@@ -1565,7 +1587,16 @@ fn render_editor(
     page_scroll:      f32,
     token_colors:     crate::markdown::editor_highlight::TokenColors,
     sync_scroll:      Option<f32>,
+    zoom:             f32,
 ) -> (Option<(usize, usize)>, f32) {
+    // Scale monospace font for zoom.
+    if zoom != 1.0 {
+        let base = ui.style().text_styles[&egui::TextStyle::Monospace].size;
+        ui.style_mut().text_styles.insert(
+            egui::TextStyle::Monospace,
+            egui::FontId::new(base * zoom, egui::FontFamily::Monospace),
+        );
+    }
     let te_id = egui::Id::new(id).with("te");
     // Drain ALL Tab key-press events from the queue before any widget sees them.
     // consume_key() modifiers matching can be unreliable (Shift+Tab vs Tab), so
@@ -1616,7 +1647,7 @@ fn render_editor(
                 use crate::markdown::editor_highlight::syntax_spans;
 
                 // 1. Syntax-colored base spans
-                let base_spans = syntax_spans(text, tc);
+                let base_spans = syntax_spans(text, tc, zoom);
 
                 // 2. Merge search highlight overlays on top.
                 //    Strategy: walk base_spans; split any span that overlaps a search

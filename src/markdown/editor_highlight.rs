@@ -21,8 +21,8 @@ pub struct TokenColors {
 
 /// Returns a flat list of `(byte_start, byte_end, TextFormat)` spans covering
 /// every byte of `text`.  The spans are non-overlapping and contiguous.
-pub fn syntax_spans(text: &str, colors: TokenColors) -> Vec<(usize, usize, TextFormat)> {
-    let mono = FontId::monospace(13.0);
+pub fn syntax_spans(text: &str, colors: TokenColors, zoom: f32) -> Vec<(usize, usize, TextFormat)> {
+    let mono = FontId::monospace(13.0 * zoom);
 
     let fmt = |color: Color32| TextFormat {
         font_id: mono.clone(),

@@ -13,6 +13,7 @@ pub fn render_markdown(
     search_query:   &str,
     search_current: usize,
     opts:           SearchOpts,
+    zoom:           f32,
 ) -> (Option<usize>, Vec<(usize, f32)>) {
     // Capture content width ONCE before any block renders.
     // At this point max_rect still reflects the original content_rect from render_preview.
@@ -58,7 +59,7 @@ pub fn render_markdown(
             block_ui.scroll_to_cursor(Some(egui::Align::TOP));
         }
 
-        render_block(&mut block_ui, block, hl, search_query, search_current, opts, &mut occurrence, &mut task_occ, &mut toggled);
+        render_block(&mut block_ui, block, hl, search_query, search_current, opts, zoom, &mut occurrence, &mut task_occ, &mut toggled);
 
         // Advance the parent cursor: full rendered height, width clamped to content_w.
         // This prevents layout overflow from ever reaching the parent UI.
@@ -82,6 +83,7 @@ fn render_block(
     search_query:   &str,
     search_current: usize,
     opts:           SearchOpts,
+    zoom:           f32,
     occurrence:     &mut usize,
     task_occ:       &mut usize,
     toggled:        &mut Option<usize>,
@@ -98,7 +100,7 @@ fn render_block(
             };
             ui.horizontal_wrapped(|ui| {
                 for inline in inlines {
-                    render_inline(ui, inline, Some(size), true, search_query, search_current, opts, occurrence);
+                    render_inline(ui, inline, Some(size), true, search_query, search_current, opts, zoom, occurrence);
                 }
             });
             if *level <= 2 {
@@ -110,7 +112,7 @@ fn render_block(
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing.y = 18.0; // Increased line height within paragraphs
                 for inline in inlines {
-                    render_inline(ui, inline, None, false, search_query, search_current, opts, occurrence);
+                    render_inline(ui, inline, None, false, search_query, search_current, opts, zoom, occurrence);
                 }
             });
         }
@@ -148,7 +150,7 @@ fn render_block(
 
                         if rel_s > local {
                             job.append(&text[local..rel_s], 0.0, TextFormat {
-                                font_id: FontId::monospace(14.0), // Slightly larger font
+                                font_id: FontId::monospace(14.0 * zoom), // Slightly larger font
                                 color:   *color,
                                 ..Default::default()
                             });
@@ -159,7 +161,7 @@ fn render_block(
                             Color32::from_rgb(255, 220, 50)
                         };
                         job.append(&text[rel_s..rel_e], 0.0, TextFormat {
-                            font_id:    FontId::monospace(14.0), // Slightly larger font
+                            font_id:    FontId::monospace(14.0 * zoom), // Slightly larger font
                             color:      Color32::BLACK,
                             background: bg,
                             ..Default::default()
@@ -169,7 +171,7 @@ fn render_block(
 
                     if local < text.len() {
                         job.append(&text[local..], 0.0, TextFormat {
-                            font_id: FontId::monospace(14.0), // Slightly larger font
+                            font_id: FontId::monospace(14.0 * zoom), // Slightly larger font
                             color:   *color,
                             ..Default::default()
                         });
@@ -201,7 +203,7 @@ fn render_block(
                             if !lang.is_empty() {
                                 ui.label(
                                     RichText::new(lang.as_str())
-                                        .size(12.0)
+                                        .size(12.0 * zoom)
                                         .color(Color32::from_gray(140))
                                         .strong(),
                                 );
@@ -243,7 +245,7 @@ fn render_block(
                         let original_fg = ui.visuals().text_color();
                         ui.visuals_mut().override_text_color = Some(ui.visuals().weak_text_color());
                         for inline in inlines {
-                            render_inline(ui, inline, None, false, search_query, search_current, opts, occurrence);
+                            render_inline(ui, inline, None, false, search_query, search_current, opts, zoom, occurrence);
                         }
                         ui.visuals_mut().override_text_color = Some(original_fg);
                     });
@@ -274,7 +276,7 @@ fn render_block(
                         };
                         ui.label(
                             RichText::new(bullet)
-                                .size(16.0)
+                                .size(16.0 * zoom)
                                 .color(ui.visuals().weak_text_color()),
                         );
                         ui.add_space(4.0);
@@ -285,7 +287,7 @@ fn render_block(
                             ui.horizontal_wrapped(|ui| {
                                 ui.spacing_mut().item_spacing.y = 16.0;
                                 for inline in &item.inlines {
-                                    render_inline(ui, inline, None, false, search_query, search_current, opts, occurrence);
+                                    render_inline(ui, inline, None, false, search_query, search_current, opts, zoom, occurrence);
                                 }
                             });
                         }
@@ -298,7 +300,7 @@ fn render_block(
                         ui.add_space(36.0);
                         ui.vertical(|ui| {
                             for child in &item.children {
-                                render_block(ui, child, hl, search_query, search_current, opts, occurrence, task_occ, toggled);
+                                render_block(ui, child, hl, search_query, search_current, opts, zoom, occurrence, task_occ, toggled);
                             }
                         });
                     });
@@ -349,7 +351,7 @@ fn render_block(
                                         ui.spacing_mut().item_spacing.y = 0.0;
                                         let mut o = occ.get();
                                         for il in header_inlines {
-                                            render_inline(ui, il, None, true, search_query, search_current, opts, &mut o);
+                                            render_inline(ui, il, None, true, search_query, search_current, opts, zoom, &mut o);
                                         }
                                         occ.set(o);
                                     });
@@ -366,7 +368,7 @@ fn render_block(
                                                 ui.spacing_mut().item_spacing.y = 16.0;
                                                 let mut o = occ.get();
                                                 for il in cell_inlines {
-                                                    render_inline(ui, il, None, false, search_query, search_current, opts, &mut o);
+                                                    render_inline(ui, il, None, false, search_query, search_current, opts, zoom, &mut o);
                                                 }
                                                 occ.set(o);
                                             });
@@ -397,9 +399,10 @@ fn render_inline(
     search_query:   &str,
     search_current: usize,
     opts:           SearchOpts,
+    zoom:           f32,
     occurrence:     &mut usize,
 ) {
-    let base = size.unwrap_or(14.0);
+    let base = size.unwrap_or(14.0) * zoom;
     match inline {
         Inline::Text(t) => {
             render_text_highlighted(ui, t, search_query, base, strong, false, None, opts, occurrence, search_current);
@@ -427,11 +430,11 @@ fn render_inline(
                 .corner_radius(3.0)
                 .show(ui, |ui| {
                     if match_offs.is_empty() {
-                        ui.monospace(c.as_str());
+                        ui.label(RichText::new(c.as_str()).font(FontId::monospace(13.0 * zoom)));
                     } else {
                         let fg   = ui.visuals().text_color();
                         let nfmt = TextFormat {
-                            font_id: FontId::monospace(13.0),
+                            font_id: FontId::monospace(13.0 * zoom),
                             color:   fg,
                             ..Default::default()
                         };
@@ -448,7 +451,7 @@ fn render_inline(
                                 Color32::from_rgb(255, 220, 50)
                             };
                             job.append(&c[start..end], 0.0, TextFormat {
-                                font_id:    FontId::monospace(13.0),
+                                font_id:    FontId::monospace(13.0 * zoom),
                                 color:      Color32::BLACK,
                                 background: bg,
                                 ..Default::default()
@@ -484,7 +487,7 @@ fn render_inline(
                     ui.label(
                         RichText::new("[external]")
                             .color(Color32::from_rgb(43, 121, 162))
-                            .size(10.0)
+                            .size(10.0 * zoom)
                             .italics()
                     );
                 }

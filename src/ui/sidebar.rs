@@ -63,6 +63,26 @@ pub fn render_sidebar(ui: &mut Ui, tree: &mut FsTree, active_color: Color32) -> 
     selected_file
 }
 
+/// Truncate `text` to fit within `max_px` pixels at the given font size, appending `…` if needed.
+/// Returns the original string if it already fits.
+fn fit_text(ctx: &egui::Context, text: &str, max_px: f32, font_id: &egui::FontId) -> String {
+    let measure = |s: &str| ctx.fonts(|f| f.layout_no_wrap(s.to_owned(), font_id.clone(), Color32::WHITE).size().x);
+    if measure(text) <= max_px {
+        return text.to_owned();
+    }
+    let ellipsis_w = measure("…");
+    let target = (max_px - ellipsis_w).max(0.0);
+    let chars: Vec<char> = text.chars().collect();
+    let mut lo = 0usize;
+    let mut hi = chars.len();
+    while lo < hi {
+        let mid = (lo + hi + 1) / 2;
+        let s: String = chars[..mid].iter().collect();
+        if measure(&s) <= target { lo = mid; } else { hi = mid - 1; }
+    }
+    format!("{}…", chars[..lo].iter().collect::<String>())
+}
+
 fn render_node(
     ui:            &mut Ui,
     node:          &FsNode,
@@ -77,7 +97,9 @@ fn render_node(
             let is_expanded = expanded.contains(&node.path);
             let is_selected = selected.as_ref() == Some(&node.path);
             let arrow = if is_expanded { "-" } else { "▶" };
-            let label = format!("{} 📁  {}", arrow, node.name);
+            let label_full = format!("{} 📁  {}", arrow, node.name);
+            let font_id = egui::FontId::proportional(13.0);
+            let label = fit_text(ui.ctx(), &label_full, ui.available_width(), &font_id);
 
             let text = if is_selected {
                 egui::RichText::new(&label).color(active_color).strong().size(13.0)
@@ -85,7 +107,7 @@ fn render_node(
                 egui::RichText::new(&label).strong().size(13.0)
             };
 
-            let resp = ui.add(egui::Label::new(text).truncate().sense(egui::Sense::click()));
+            let resp = ui.add(egui::Label::new(text).sense(egui::Sense::click()));
             paint_accent_bar(ui, resp.rect, is_selected, active_color);
             if resp.hovered() {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
@@ -114,7 +136,9 @@ fn render_node(
         }
         FsNodeKind::File => {
             let is_selected = selected.as_ref() == Some(&node.path);
-            let label = format!("📄  {}", node.name);
+            let label_full = format!("📄  {}", node.name);
+            let font_id = egui::FontId::proportional(13.0);
+            let label = fit_text(ui.ctx(), &label_full, ui.available_width(), &font_id);
 
             let text = if is_selected {
                 egui::RichText::new(&label).color(active_color).size(13.0)
@@ -124,7 +148,7 @@ fn render_node(
                     .size(13.0)
             };
 
-            let resp = ui.add(egui::Label::new(text).truncate().sense(egui::Sense::click()));
+            let resp = ui.add(egui::Label::new(text).sense(egui::Sense::click()));
             paint_accent_bar(ui, resp.rect, is_selected, active_color);
             if resp.hovered() {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);

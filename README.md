@@ -26,7 +26,11 @@ A fast, native desktop markdown reader and editor built with [egui](https://gith
 
 | Split mode (light theme) | Preview mode (coal theme) |
 |---|---|
-| ![md_reader Split mode screenshot](https://raw.githubusercontent.com/bauj/md_reader/main/assets/screenshots/md_reader_preview.png) | ![md_reader Preview mode screenshot](https://raw.githubusercontent.com/bauj/md_reader/main/assets/screenshots/md_reader_preview_coal.png) | 
+| ![md_reader Split mode light theme](https://raw.githubusercontent.com/bauj/md_reader/main/assets/screenshots/md_reader_preview_light_split.png) | ![md_reader Preview mode coal theme](https://raw.githubusercontent.com/bauj/md_reader/main/assets/screenshots/md_reader_preview_coal_preview.png) | 
+
+| Split mode (ayu theme) | Split mode (navy theme) |
+|---|---|
+| ![md_reader Split mode ayu theme](https://raw.githubusercontent.com/bauj/md_reader/main/assets/screenshots/md_reader_preview_ayu_split.png) | ![md_reader Split mode navy theme](https://raw.githubusercontent.com/bauj/md_reader/main/assets/screenshots/md_reader_preview_navy_split.png) | 
 
 ---
 
@@ -91,9 +95,14 @@ MIT — see [LICENSE](LICENSE).
 
 ## Fonts
 
-The following fonts are embedded in the binary under the [SIL Open Font License 1.1](https://openfontlicense.org):
+All fonts are licensed under the [SIL Open Font License 1.1](https://openfontlicense.org). License texts are included in [`assets/fonts/licenses/`](assets/fonts/licenses/).
 
-- [JetBrains Mono](https://www.jetbrains.com/legalnotice/jetbrainsmono/) — used for code blocks and the editor
-- [Noto Sans Bold](https://fonts.google.com/noto) — used for bold text in the markdown renderer
-
-License texts are included in [`assets/fonts/licenses/`](assets/fonts/licenses/).
+| Font | Role |
+|---|---|
+| [JetBrains Mono](https://www.jetbrains.com/legalnotice/jetbrainsmono/) | Code blocks and editor (monospace) |
+| [Outfit](https://fonts.google.com/specimen/Outfit) | UI chrome (toolbar, sidebar, menus) |
+| [Rubik](https://fonts.google.com/specimen/Rubik) | Preview body text — **default** |
+| [Nunito](https://fonts.google.com/specimen/Nunito) | Preview body text — selectable |
+| [Figtree](https://fonts.google.com/specimen/Figtree) | Preview body text — selectable |
+| [Manrope](https://fonts.google.com/specimen/Manrope) | Preview body text — selectable |
+| [Source Sans 3](https://fonts.google.com/specimen/Source+Sans+3) | Preview body text — selectable |

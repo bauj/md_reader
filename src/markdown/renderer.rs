@@ -225,15 +225,11 @@ fn render_block(
                         .id_salt(("cb", occ_base))
                         .auto_shrink([false, true])
                         .show(ui, |ui| {
-                            // Lay out the galley explicitly so its natural width is
-                            // used for allocation (Label::show would re-wrap at
-                            // available_width, defeating the scroll area).
-                            let galley = ui.fonts(|f| f.layout_job(job));
-                            let size   = galley.size();
-                            let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
-                            if ui.is_rect_visible(rect) {
-                                ui.painter().galley(rect.min, galley, Color32::WHITE);
-                            }
+                            ui.add(
+                                egui::Label::new(job)
+                                    .selectable(true)
+                                    .wrap_mode(egui::TextWrapMode::Extend),
+                            );
                         });
                 });
         }
@@ -492,22 +488,20 @@ fn render_inline(
             let occ_base    = *occurrence;
             let match_count = match_offs.len();
 
-            let font_id  = FontId::monospace(13.0 * zoom);
-            let fg       = ui.visuals().text_color();
-            let bg       = ui.visuals().faint_bg_color;
-            let h_pad    = 3.0_f32;
-            let v_pad    = 1.0_f32;
+            let font_id = FontId::monospace(13.0 * zoom);
+            let fg      = ui.visuals().text_color();
+            let bg      = ui.visuals().faint_bg_color;
+            let h_pad   = 3.0_f32;
+            let v_pad   = 1.0_f32;
 
-            // Build the galley with infinite wrap width so the text never wraps
-            // inside the code span regardless of available line space.
-            let galley = if match_offs.is_empty() {
-                ui.fonts(|f| f.layout_no_wrap(c.to_string(), font_id, fg))
+            // Reserve a painter slot so the background rect is drawn behind the
+            // selectable label (painter slots execute in insertion order).
+            let bg_shape = ui.painter().add(egui::Shape::Noop);
+
+            let widget_text: egui::WidgetText = if match_offs.is_empty() {
+                egui::RichText::new(c.as_str()).font(font_id).color(fg).into()
             } else {
-                let nfmt = TextFormat {
-                    font_id: font_id.clone(),
-                    color:   fg,
-                    ..Default::default()
-                };
+                let nfmt = TextFormat { font_id: font_id.clone(), color: fg, ..Default::default() };
                 let mut job = LayoutJob::default();
                 job.wrap.max_width = f32::INFINITY;
                 let mut pos = 0usize;
@@ -526,21 +520,24 @@ fn render_inline(
                     pos = end;
                 }
                 if pos < c.len() { job.append(&c[pos..], 0.0, nfmt); }
-                ui.fonts(|f| f.layout_job(job))
+                job.into()
             };
 
-            let text_size  = galley.size();
-            let frame_size = egui::vec2(text_size.x + 2.0 * h_pad, text_size.y + 2.0 * v_pad);
+            let resp = ui.add(
+                egui::Label::new(widget_text)
+                    .selectable(true)
+                    .wrap_mode(egui::TextWrapMode::Extend),
+            );
 
-            // allocate_exact_size participates in horizontal_wrapped's wrap logic:
-            // if the frame doesn't fit in the remaining line space it is placed on
-            // the next row automatically — no manual cursor manipulation needed.
-            let (rect, _) = ui.allocate_exact_size(frame_size, egui::Sense::hover());
-
-            if ui.is_rect_visible(rect) {
-                ui.painter().rect_filled(rect, 3.0, bg);
-                ui.painter().galley(egui::pos2(rect.min.x + h_pad, rect.min.y + v_pad), galley, fg);
-            }
+            // Fill the reserved slot with the background, expanded to include padding.
+            ui.painter().set(
+                bg_shape,
+                egui::Shape::rect_filled(
+                    resp.rect.expand2(egui::vec2(h_pad, v_pad)),
+                    3.0,
+                    bg,
+                ),
+            );
 
             *occurrence += match_count;
         }

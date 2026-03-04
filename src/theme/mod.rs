@@ -57,14 +57,14 @@ pub const THEMES: &[Theme] = &[
         toolbar_bg:  Color32::from_rgb(232, 228, 218), // toolbar sits visually below sidebar
         tab_bar_bg:  Color32::from_rgb(222, 217, 206), // distinct strip
         fg:          Color32::from_rgb(30, 27, 22),    // warm near-black ink
-        fg_muted:    Color32::from_rgb(110, 104, 92),  // warm mid-tone
+        fg_muted:    Color32::from_rgb(94, 88, 76),    // warm mid-tone — darker for better contrast
         sidebar_fg:  Color32::from_rgb(45, 42, 36),
-        sidebar_active: Color32::from_rgb(12, 88, 188), // deep sapphire
-        link:           Color32::from_rgb(12, 88, 188),
+        sidebar_active: Color32::from_rgb(14, 94, 200), // deep sapphire — slightly more vivid
+        link:           Color32::from_rgb(14, 94, 200),
         selection_bg:   Color32::from_rgb(185, 215, 255),
-        code_bg:        Color32::from_rgb(230, 226, 216),
-        inline_code_fg: Color32::from_rgb(172, 20, 92), // distinctive crimson
-        separator:      Color32::from_rgb(200, 195, 184),
+        code_bg:        Color32::from_rgb(220, 216, 206), // more distinct from bg
+        inline_code_fg: Color32::from_rgb(180, 26, 100),  // crimson — slightly brighter
+        separator:      Color32::from_rgb(198, 193, 182),
     },
 
     // ── Coal — "Graphite" ────────────────────────────────────────────────────
@@ -72,19 +72,19 @@ pub const THEMES: &[Theme] = &[
     // Like artist charcoal on smooth black paper.
     Theme {
         id: ThemeId::Coal,
-        bg:          Color32::from_rgb(18, 18, 20),   // near-black with warmth
-        sidebar_bg:  Color32::from_rgb(26, 26, 29),   // subtle lift for sidebar
-        toolbar_bg:  Color32::from_rgb(22, 22, 24),   // between bg and sidebar
-        tab_bar_bg:  Color32::from_rgb(13, 13, 15),   // darkest surface
+        bg:          Color32::from_rgb(17, 17, 19),   // near-black with warmth
+        sidebar_bg:  Color32::from_rgb(27, 27, 31),   // subtle lift — slightly cooler tint
+        toolbar_bg:  Color32::from_rgb(22, 22, 25),   // between bg and sidebar
+        tab_bar_bg:  Color32::from_rgb(12, 12, 14),   // darkest surface
         fg:          Color32::from_rgb(240, 236, 228), // warm off-white
-        fg_muted:    Color32::from_rgb(130, 124, 114), // warm mid-gray
+        fg_muted:    Color32::from_rgb(138, 132, 122), // slightly brighter than before
         sidebar_fg:  Color32::from_rgb(212, 208, 200),
-        sidebar_active: Color32::from_rgb(70, 165, 255), // sharp electric blue
-        link:           Color32::from_rgb(70, 165, 255),
+        sidebar_active: Color32::from_rgb(92, 182, 255), // softened blue — less harsh
+        link:           Color32::from_rgb(92, 182, 255),
         selection_bg:   Color32::from_rgb(36, 82, 132),
-        code_bg:        Color32::from_rgb(23, 23, 26),
-        inline_code_fg: Color32::from_rgb(232, 168, 58), // warm amber on dark
-        separator:      Color32::from_rgb(38, 38, 44),
+        code_bg:        Color32::from_rgb(21, 21, 24), // slightly darker for contrast
+        inline_code_fg: Color32::from_rgb(240, 184, 72), // warmer amber
+        separator:      Color32::from_rgb(40, 40, 46),
     },
 
     // ── Navy — "Midnight Deep" ───────────────────────────────────────────────
@@ -92,19 +92,19 @@ pub const THEMES: &[Theme] = &[
     // Bright cyan cuts through like bioluminescence.
     Theme {
         id: ThemeId::Navy,
-        bg:          Color32::from_rgb(18, 30, 58),    // saturated deep navy
-        sidebar_bg:  Color32::from_rgb(10, 18, 38),    // darker abyss
-        toolbar_bg:  Color32::from_rgb(13, 23, 45),    // between
-        tab_bar_bg:  Color32::from_rgb(7, 13, 28),     // near-black navy
+        bg:          Color32::from_rgb(15, 26, 52),   // deeper navy — more saturated
+        sidebar_bg:  Color32::from_rgb(8, 14, 30),    // abyss — more contrast vs bg
+        toolbar_bg:  Color32::from_rgb(11, 19, 40),   // between
+        tab_bar_bg:  Color32::from_rgb(5, 10, 22),    // near-black navy
         fg:          Color32::from_rgb(215, 232, 255),  // light blue-tinted white
-        fg_muted:    Color32::from_rgb(108, 142, 195),  // desaturated mid blue
+        fg_muted:    Color32::from_rgb(128, 164, 218),  // lifted for proper WCAG contrast
         sidebar_fg:  Color32::from_rgb(186, 214, 252),
-        sidebar_active: Color32::from_rgb(50, 198, 255), // bioluminescent cyan
-        link:           Color32::from_rgb(50, 198, 255),
+        sidebar_active: Color32::from_rgb(42, 202, 252), // more vivid bioluminescent cyan
+        link:           Color32::from_rgb(42, 202, 252),
         selection_bg:   Color32::from_rgb(26, 66, 122),
-        code_bg:        Color32::from_rgb(11, 20, 42),
-        inline_code_fg: Color32::from_rgb(144, 214, 255), // softer cyan
-        separator:      Color32::from_rgb(30, 46, 82),
+        code_bg:        Color32::from_rgb(9, 17, 36),  // darker for clear contrast
+        inline_code_fg: Color32::from_rgb(108, 206, 255), // distinct from fg — not just white
+        separator:      Color32::from_rgb(24, 40, 72),
     },
 
     // ── Ayu — "Ember" ────────────────────────────────────────────────────────
@@ -113,18 +113,18 @@ pub const THEMES: &[Theme] = &[
     Theme {
         id: ThemeId::Ayu,
         bg:          Color32::from_rgb(10, 14, 20),    // deep void, slight blue-dark
-        sidebar_bg:  Color32::from_rgb(15, 20, 29),    // subtle rise
-        toolbar_bg:  Color32::from_rgb(11, 16, 23),    // between
+        sidebar_bg:  Color32::from_rgb(16, 21, 30),    // subtle rise — slightly more lift
+        toolbar_bg:  Color32::from_rgb(12, 17, 24),    // between
         tab_bar_bg:  Color32::from_rgb(7, 10, 14),     // near-black
-        fg:          Color32::from_rgb(196, 192, 184),  // warm star-white
-        fg_muted:    Color32::from_rgb(78, 88, 106),    // cool-dark mid
-        sidebar_fg:  Color32::from_rgb(165, 170, 186),
-        sidebar_active: Color32::from_rgb(255, 152, 26), // golden fire amber
-        link:           Color32::from_rgb(46, 180, 222),  // cold cyan (contrast)
-        selection_bg:   Color32::from_rgb(26, 43, 68),
-        code_bg:        Color32::from_rgb(13, 18, 25),
-        inline_code_fg: Color32::from_rgb(255, 152, 26),  // amber matches accent
-        separator:      Color32::from_rgb(20, 28, 42),
+        fg:          Color32::from_rgb(200, 196, 188),  // warm star-white — slightly brighter
+        fg_muted:    Color32::from_rgb(110, 122, 148),  // FIXED: was (78,88,106) — too low contrast
+        sidebar_fg:  Color32::from_rgb(168, 174, 190),
+        sidebar_active: Color32::from_rgb(255, 168, 48), // brighter fire amber
+        link:           Color32::from_rgb(58, 196, 234),  // brighter cold cyan
+        selection_bg:   Color32::from_rgb(28, 46, 72),
+        code_bg:        Color32::from_rgb(13, 18, 26),
+        inline_code_fg: Color32::from_rgb(255, 168, 48),  // amber matches accent
+        separator:      Color32::from_rgb(22, 30, 46),
     },
 ];
 

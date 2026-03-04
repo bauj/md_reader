@@ -17,6 +17,9 @@ pub struct AppState {
     /// Active theme: "light" | "rust" | "coal" | "navy" | "ayu".
     #[serde(default = "default_theme")]
     pub theme: String,
+    /// Preview body font: "lora" | "source_sans".
+    #[serde(default = "default_body_font")]
+    pub body_font: String,
     /// Fraction of split-mode width given to the editor pane (0.2–0.8).
     #[serde(default)]
     pub split_ratio: Option<f32>,
@@ -24,6 +27,10 @@ pub struct AppState {
 
 fn default_theme() -> String {
     "light".to_string()
+}
+
+fn default_body_font() -> String {
+    "rubik".to_string()
 }
 
 /// Returns the platform config path, e.g. `~/.config/md_reader/state.json` on Linux.

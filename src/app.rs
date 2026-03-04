@@ -9,6 +9,59 @@ use crate::persist;
 use crate::theme::ThemeId;
 use crate::ui::{render_outline, render_sidebar};
 
+/// Preview body font choice — persisted across sessions.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BodyFont {
+    SourceSans,
+    Nunito,
+    Rubik,
+    Figtree,
+    Manrope,
+}
+
+impl BodyFont {
+    pub fn name(self) -> &'static str {
+        match self {
+            BodyFont::SourceSans => "Source Sans",
+            BodyFont::Nunito    => "Nunito",
+            BodyFont::Rubik     => "Rubik",
+            BodyFont::Figtree   => "Figtree",
+            BodyFont::Manrope   => "Manrope",
+        }
+    }
+
+    /// The egui FontFamily registered in setup_fonts for this choice.
+    pub fn family(self) -> egui::FontFamily {
+        match self {
+            BodyFont::SourceSans => egui::FontFamily::Name("Body-Sans".into()),
+            BodyFont::Nunito    => egui::FontFamily::Name("Body-Nunito".into()),
+            BodyFont::Rubik     => egui::FontFamily::Name("Body-Rubik".into()),
+            BodyFont::Figtree   => egui::FontFamily::Name("Body-Figtree".into()),
+            BodyFont::Manrope   => egui::FontFamily::Name("Body-Manrope".into()),
+        }
+    }
+
+    fn from_str(s: &str) -> Self {
+        match s {
+            "source_sans" => BodyFont::SourceSans,
+            "nunito"      => BodyFont::Nunito,
+            "figtree"     => BodyFont::Figtree,
+            "manrope"     => BodyFont::Manrope,
+            _             => BodyFont::Rubik,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            BodyFont::SourceSans => "source_sans",
+            BodyFont::Nunito    => "nunito",
+            BodyFont::Rubik     => "rubik",
+            BodyFont::Figtree   => "figtree",
+            BodyFont::Manrope   => "manrope",
+        }
+    }
+}
+
 /// Holds a live notify watcher and the channel end we poll each frame.
 struct FileWatcher {
     // Kept alive so the background thread keeps running.
@@ -90,6 +143,7 @@ pub struct App {
 
     view_mode: ViewMode,
     active_theme: ThemeId,
+    active_body_font: BodyFont,
 
     recent_files: Vec<PathBuf>,
 
@@ -145,6 +199,7 @@ impl App {
             highlighter:       Highlighter::new(),
             view_mode:         ViewMode::from_str(&state.view_mode),
             active_theme:      Self::parse_theme(&state.theme),
+            active_body_font:  BodyFont::from_str(&state.body_font),
             recent_files:      state.recent_files.into_iter().filter(|p| p.is_file()).collect(),
             pending_action:       None,
             dialog_focused_button: 0,
@@ -312,6 +367,7 @@ impl App {
             view_mode:    self.view_mode.as_str().to_string(),
             recent_files: self.recent_files.clone(),
             theme:        theme_str.to_string(),
+            body_font:    self.active_body_font.as_str().to_string(),
             split_ratio:  Some(self.split_ratio),
         };
         persist::save(&state);
@@ -817,6 +873,16 @@ impl eframe::App for App {
                     }
                 }).response.on_hover_text("Choose color theme");
 
+                // Preview body font picker
+                ui.menu_button("Font", |ui| {
+                    for &font in &[BodyFont::Rubik, BodyFont::Nunito, BodyFont::Figtree, BodyFont::Manrope, BodyFont::SourceSans] {
+                        if ui.selectable_label(self.active_body_font == font, font.name()).clicked() {
+                            self.active_body_font = font;
+                            ui.close_menu();
+                        }
+                    }
+                }).response.on_hover_text("Choose preview body font");
+
                 ui.separator();
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1126,7 +1192,7 @@ impl eframe::App for App {
                             let sq   = self.search_query.as_str();
                             let sc   = self.search_current;
                             let opts = SearchOpts { case_sensitive: self.search_case_sensitive, whole_word: self.search_whole_word };
-                            render_preview(ui, &tab.parsed_doc, &tab.buffer, scroll_to, page_scroll + arrow_scroll, &format!("preview_{idx}"), &mut self.highlighter, sq, sc, opts, sync, self.content_zoom)
+                            render_preview(ui, &tab.parsed_doc, &tab.buffer, scroll_to, page_scroll + arrow_scroll, &format!("preview_{idx}"), &mut self.highlighter, sq, sc, opts, sync, self.content_zoom, &self.active_body_font.family())
                         };
                         self.tabs[idx].preview_scroll_y = offset;
                         self.tabs[idx].heading_positions = heading_positions;
@@ -1270,6 +1336,7 @@ impl eframe::App for App {
                             opts,
                             preview_sync,
                             zoom,
+                            &self.active_body_font.family(),
                         );
                         tab.preview_scroll_y = poffset;
                         tab.heading_positions = preview_heading_positions;
@@ -1391,6 +1458,7 @@ fn render_preview(
     opts:           SearchOpts,
     sync_scroll:    Option<f32>,
     zoom:           f32,
+    body_font:      &egui::FontFamily,
 ) -> (Option<usize>, f32, Vec<(usize, f32)>, bool) {
     // Measure from max_rect, which correctly reflects the column width in split mode.
     // clip_rect() would return the parent panel's full width because ui.columns() does
@@ -1437,6 +1505,7 @@ fn render_preview(
                 crate::markdown::render_markdown(
                     &mut child_ui, doc, scroll_to, hl,
                     search_query, search_current, opts, zoom,
+                    body_font,
                 )
             } else {
                 if !buffer.is_empty() {
@@ -1964,13 +2033,13 @@ fn apply_theme(ctx: &egui::Context, theme_id: ThemeId) {
     // ── Spacing / typography ──────────────────────────────────────────────────
     let mut style = (*ctx.style()).clone();
     style.spacing.item_spacing           = egui::vec2(8.0, 6.0);
-    style.spacing.button_padding         = egui::vec2(10.0, 5.0);
-    style.spacing.menu_margin            = egui::Margin::same(6);
-    style.spacing.indent                 = 20.0;
-    style.spacing.scroll.bar_width       = 7.0;
-    style.spacing.scroll.bar_inner_margin = 2.0;
+    style.spacing.button_padding         = egui::vec2(14.0, 7.0); // more comfortable click targets
+    style.spacing.menu_margin            = egui::Margin::same(8);  // a touch more breathing room
+    style.spacing.indent                 = 18.0;
+    style.spacing.scroll.bar_width       = 5.0;  // sleeker scroll bar
+    style.spacing.scroll.bar_inner_margin = 3.0;
 
-    if let Some(f) = style.text_styles.get_mut(&egui::TextStyle::Body)   { f.size = 16.0; }
+    if let Some(f) = style.text_styles.get_mut(&egui::TextStyle::Body)   { f.size = 15.0; }
     if let Some(f) = style.text_styles.get_mut(&egui::TextStyle::Small)  { f.size = 12.0; }
     if let Some(f) = style.text_styles.get_mut(&egui::TextStyle::Button) { f.size = 13.0; }
 

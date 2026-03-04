@@ -15,6 +15,7 @@ pub fn render_markdown(
     search_current: usize,
     opts:           SearchOpts,
     zoom:           f32,
+    body_font:      &egui::FontFamily,
 ) -> (Option<usize>, Vec<(usize, f32)>) {
     // Capture content width ONCE before any block renders.
     // At this point max_rect still reflects the original content_rect from render_preview.
@@ -59,7 +60,7 @@ pub fn render_markdown(
             block_ui.scroll_to_cursor(Some(egui::Align::TOP));
         }
 
-        render_block(&mut block_ui, block, hl, search_query, search_current, opts, zoom, &mut occurrence, &mut task_occ, &mut toggled);
+        render_block(&mut block_ui, block, hl, search_query, search_current, opts, zoom, body_font, &mut occurrence, &mut task_occ, &mut toggled);
 
         // Advance the parent cursor: full rendered height, width clamped to content_w.
         // This prevents layout overflow from ever reaching the parent UI.
@@ -84,6 +85,7 @@ fn render_block(
     search_current: usize,
     opts:           SearchOpts,
     zoom:           f32,
+    body_font:      &egui::FontFamily,
     occurrence:     &mut usize,
     task_occ:       &mut usize,
     toggled:        &mut Option<usize>,
@@ -100,7 +102,7 @@ fn render_block(
             };
             ui.horizontal_wrapped(|ui| {
                 for inline in inlines {
-                    render_inline(ui, inline, Some(size), true, search_query, search_current, opts, zoom, occurrence);
+                    render_inline(ui, inline, Some(size), true, search_query, search_current, opts, zoom, body_font, occurrence);
                 }
             });
             if *level <= 2 {
@@ -112,7 +114,7 @@ fn render_block(
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing.y = 18.0; // Increased line height within paragraphs
                 for inline in inlines {
-                    render_inline(ui, inline, None, false, search_query, search_current, opts, zoom, occurrence);
+                    render_inline(ui, inline, None, false, search_query, search_current, opts, zoom, body_font, occurrence);
                 }
             });
         }
@@ -256,7 +258,7 @@ fn render_block(
                         ui.visuals_mut().override_text_color =
                             Some(ui.visuals().weak_text_color());
                         for inline in inlines {
-                            render_inline(ui, inline, None, false, search_query, search_current, opts, zoom, occurrence);
+                            render_inline(ui, inline, None, false, search_query, search_current, opts, zoom, body_font, occurrence);
                         }
                     });
                 });
@@ -305,7 +307,7 @@ fn render_block(
                             ui.horizontal_wrapped(|ui| {
                                 ui.spacing_mut().item_spacing.y = 16.0;
                                 for inline in &item.inlines {
-                                    render_inline(ui, inline, None, false, search_query, search_current, opts, zoom, occurrence);
+                                    render_inline(ui, inline, None, false, search_query, search_current, opts, zoom, body_font, occurrence);
                                 }
                             });
                         }
@@ -318,7 +320,7 @@ fn render_block(
                         ui.add_space(36.0);
                         ui.vertical(|ui| {
                             for child in &item.children {
-                                render_block(ui, child, hl, search_query, search_current, opts, zoom, occurrence, task_occ, toggled);
+                                render_block(ui, child, hl, search_query, search_current, opts, zoom, body_font, occurrence, task_occ, toggled);
                             }
                         });
                     });
@@ -369,7 +371,7 @@ fn render_block(
                                         ui.spacing_mut().item_spacing.y = 0.0;
                                         let mut o = occ.get();
                                         for il in header_inlines {
-                                            render_inline(ui, il, None, true, search_query, search_current, opts, zoom, &mut o);
+                                            render_inline(ui, il, None, true, search_query, search_current, opts, zoom, body_font, &mut o);
                                         }
                                         occ.set(o);
                                     });
@@ -386,7 +388,7 @@ fn render_block(
                                                 ui.spacing_mut().item_spacing.y = 16.0;
                                                 let mut o = occ.get();
                                                 for il in cell_inlines {
-                                                    render_inline(ui, il, None, false, search_query, search_current, opts, zoom, &mut o);
+                                                    render_inline(ui, il, None, false, search_query, search_current, opts, zoom, body_font, &mut o);
                                                 }
                                                 occ.set(o);
                                             });
@@ -418,21 +420,22 @@ fn render_inline(
     search_current: usize,
     opts:           SearchOpts,
     zoom:           f32,
+    body_font:      &egui::FontFamily,
     occurrence:     &mut usize,
 ) {
     let base = size.unwrap_or(14.0) * zoom;
     match inline {
         Inline::Text(t) => {
-            render_text_highlighted(ui, t, search_query, base, strong, false, None, opts, occurrence, search_current);
+            render_text_highlighted(ui, t, search_query, base, strong, false, None, opts, body_font, occurrence, search_current);
         }
         Inline::Bold(t) => {
-            render_text_highlighted(ui, t, search_query, base, true, false, None, opts, occurrence, search_current);
+            render_text_highlighted(ui, t, search_query, base, true, false, None, opts, body_font, occurrence, search_current);
         }
         Inline::Italic(t) => {
-            render_text_highlighted(ui, t, search_query, base, strong, true, None, opts, occurrence, search_current);
+            render_text_highlighted(ui, t, search_query, base, strong, true, None, opts, body_font, occurrence, search_current);
         }
         Inline::BoldItalic(t) => {
-            render_text_highlighted(ui, t, search_query, base, true, true, None, opts, occurrence, search_current);
+            render_text_highlighted(ui, t, search_query, base, true, true, None, opts, body_font, occurrence, search_current);
         }
         Inline::Code(c) => {
             let match_offs  = find_matches(c, search_query, opts);
@@ -571,13 +574,14 @@ fn render_text_highlighted(
     italic:         bool,
     explicit_color: Option<Color32>,
     opts:           SearchOpts,
+    body_font:      &egui::FontFamily,
     occurrence:     &mut usize,
     current_match:  usize,
 ) {
     let matches = find_matches(text, query, opts);
 
     if matches.is_empty() {
-        ui.label(styled_rt(text, size, bold, italic, explicit_color));
+        ui.label(styled_rt(text, size, bold, italic, explicit_color, body_font));
         return;
     }
 
@@ -587,7 +591,7 @@ fn render_text_highlighted(
     for &start in &matches {
         let end = start + qlen;
         if start > pos {
-            ui.label(styled_rt(&text[pos..start], size, bold, italic, explicit_color));
+            ui.label(styled_rt(&text[pos..start], size, bold, italic, explicit_color, body_font));
         }
         let bg = if *occurrence == current_match {
             Color32::from_rgb(255, 150, 0)
@@ -596,14 +600,14 @@ fn render_text_highlighted(
         };
         *occurrence += 1;
         ui.label(
-            styled_rt(&text[start..end], size, bold, italic, explicit_color)
+            styled_rt(&text[start..end], size, bold, italic, explicit_color, body_font)
                 .background_color(bg)
                 .color(Color32::BLACK),
         );
         pos = end;
     }
     if pos < text.len() {
-        ui.label(styled_rt(&text[pos..], size, bold, italic, explicit_color));
+        ui.label(styled_rt(&text[pos..], size, bold, italic, explicit_color, body_font));
     }
 }
 
@@ -654,13 +658,16 @@ fn needle_len(query: &str, opts: SearchOpts) -> usize {
 }
 
 #[inline]
-fn styled_rt(text: &str, size: f32, bold: bool, italic: bool, explicit_color: Option<Color32>) -> RichText {
+fn styled_rt(text: &str, size: f32, bold: bool, italic: bool, explicit_color: Option<Color32>, body_font: &egui::FontFamily) -> RichText {
     let rt = if bold {
-        RichText::new(text)
-            .size(size)
-            .font(FontId::new(size, egui::FontFamily::Name("Bold".into())))
+        // Derive the bold family from the body family by convention: "Body-X" → "Body-X-Bold".
+        let bold_family = match body_font {
+            egui::FontFamily::Name(n) => egui::FontFamily::Name(format!("{n}-Bold").into()),
+            other                     => other.clone(),
+        };
+        RichText::new(text).size(size).font(FontId::new(size, bold_family))
     } else {
-        RichText::new(text).size(size)
+        RichText::new(text).size(size).font(FontId::new(size, body_font.clone()))
     };
     let rt = if italic { rt.italics() } else { rt };
     if let Some(c) = explicit_color { rt.color(c) } else { rt }

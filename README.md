@@ -22,6 +22,12 @@ A fast, native desktop markdown reader and editor built with [egui](https://gith
 
 ---
 
+## Preview
+
+![md_reader Split mode screenshot](https://raw.githubusercontent.com/bauj/md_reader/main/assets/screenshots/md_reader_preview.png)
+
+---
+
 ## Installation
 
 ```bash

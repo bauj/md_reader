@@ -2,7 +2,7 @@
 
 [![crates.io](https://img.shields.io/crates/v/md_reader.svg)](https://crates.io/crates/md_reader)
 
-A fast, native desktop markdown reader and editor built with [egui](https://github.com/emilk/egui). Open a folder and browse your notes with live preview, syntax-highlighted code blocks, and a persistent session that remembers where you left off.
+A fast, native desktop markdown reader and editor built with [egui](https://github.com/emilk/egui) and Claude. Open a folder and browse your notes with live preview, syntax-highlighted code blocks, and a persistent session that remembers where you left off.
 
 ---
 

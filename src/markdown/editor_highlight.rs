@@ -51,7 +51,7 @@ pub fn syntax_spans(text: &str, colors: TokenColors, zoom: f32) -> Vec<(usize, u
                 spans.push((line_start, line_end, fmt(colors.fence_marker)));
             } else {
                 // opening fence (may have a language tag after ```)
-                let fence_len = if trimmed.starts_with("```") { 3 } else { 3 };
+                let fence_len = 3;
                 let fence_abs = line_start + (line.len() - trimmed.len()); // indent offset
                 let tag_start = fence_abs + fence_len;
                 spans.push((line_start, tag_start, fmt(colors.fence_marker)));
@@ -177,8 +177,8 @@ fn inline_spans(
         }
 
         // ── Image  ![alt](url) ───────────────────────────────────────────
-        if b == b'!' && i + 1 < len && bytes[i + 1] == b'[' {
-            if let Some((bracket_end, url_end)) = find_link(bytes, i + 1) {
+        if b == b'!' && i + 1 < len && bytes[i + 1] == b'['
+            && let Some((bracket_end, url_end)) = find_link(bytes, i + 1) {
                 push(out, seg, i, colors.normal);
                 push(out, i, bracket_end, fmt(colors.link_text).color); // reuse
                 push(out, bracket_end, url_end, colors.link_url);
@@ -186,11 +186,10 @@ fn inline_spans(
                 seg = i;
                 continue;
             }
-        }
 
         // ── Link  [text](url) ────────────────────────────────────────────
-        if b == b'[' {
-            if let Some((bracket_end, url_end)) = find_link(bytes, i) {
+        if b == b'['
+            && let Some((bracket_end, url_end)) = find_link(bytes, i) {
                 push(out, seg, i, colors.normal);
                 push(out, i, bracket_end, colors.link_text);
                 push(out, bracket_end, url_end, colors.link_url);
@@ -198,41 +197,37 @@ fn inline_spans(
                 seg = i;
                 continue;
             }
-        }
 
         // ── Bold+Italic  ***...*** ───────────────────────────────────────
-        if b == b'*' && peek3(bytes, i, b'*', b'*', b'*') {
-            if let Some(close) = find_closing(bytes, i + 3, b"***") {
+        if b == b'*' && peek3(bytes, i, b'*', b'*', b'*')
+            && let Some(close) = find_closing(bytes, i + 3, b"***") {
                 push(out, seg, i, colors.normal);
                 push(out, i, close, colors.bold_italic);
                 i = close;
                 seg = i;
                 continue;
             }
-        }
 
         // ── Bold  **...** ────────────────────────────────────────────────
-        if b == b'*' && peek2(bytes, i, b'*', b'*') {
-            if let Some(close) = find_closing(bytes, i + 2, b"**") {
+        if b == b'*' && peek2(bytes, i, b'*', b'*')
+            && let Some(close) = find_closing(bytes, i + 2, b"**") {
                 push(out, seg, i, colors.normal);
                 push(out, i, close, colors.bold);
                 i = close;
                 seg = i;
                 continue;
             }
-        }
 
         // ── Italic  *...* ────────────────────────────────────────────────
         // Only trigger when not followed by another '*' (avoid *** / ** handled above).
-        if b == b'*' && (i + 1 >= len || bytes[i + 1] != b'*') {
-            if let Some(close) = find_closing(bytes, i + 1, b"*") {
+        if b == b'*' && (i + 1 >= len || bytes[i + 1] != b'*')
+            && let Some(close) = find_closing(bytes, i + 1, b"*") {
                 push(out, seg, i, colors.normal);
                 push(out, i, close, colors.italic);
                 i = close;
                 seg = i;
                 continue;
             }
-        }
 
         i += 1;
     }

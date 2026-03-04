@@ -18,17 +18,13 @@ pub enum FsNodeKind {
     Dir,
 }
 
+#[derive(Default)]
 pub struct FsTree {
     pub root:     Option<FsNode>,
     pub expanded: HashSet<PathBuf>,
     pub selected: Option<PathBuf>,
 }
 
-impl Default for FsTree {
-    fn default() -> Self {
-        FsTree { root: None, expanded: HashSet::new(), selected: None }
-    }
-}
 
 impl FsTree {
     /// Open `root_path`, scanning only the top level immediately.

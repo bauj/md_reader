@@ -125,7 +125,7 @@ pub fn render_outline(
         };
         if top_pad > 0.0 { ui.add_space(top_pad); }
 
-        let is_active = active_block.map_or(false, |ab| ab == *block_idx);
+        let is_active = active_block == Some(*block_idx);
 
         // Auto-scroll to the active item only if it just changed (not on every frame).
         // This gives priority to manual user scrolling of the outline.

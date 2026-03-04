@@ -6,6 +6,7 @@ pub struct ParsedDoc {
 }
 
 #[derive(Clone, Debug)]
+#[allow(clippy::enum_variant_names)]
 pub enum Block {
     Heading(u32, Vec<Inline>),
     Paragraph(Vec<Inline>),

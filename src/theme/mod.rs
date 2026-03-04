@@ -20,8 +20,7 @@ impl ThemeId {
 }
 
 pub struct Theme {
-    pub id:   ThemeId,
-    pub name: &'static str,
+    pub id: ThemeId,
 
     // Surfaces
     pub bg:          Color32,  // central panel / preview background
@@ -45,7 +44,6 @@ pub struct Theme {
 
     // Structure
     pub separator: Color32,  // hr, dividers
-    pub quote_bg:  Color32,  // blockquote tint
 }
 
 pub const THEMES: &[Theme] = &[
@@ -53,8 +51,7 @@ pub const THEMES: &[Theme] = &[
     // Warm cream paper. The writing desk at golden hour.
     // Sapphire accent pops against the warm neutrals without jarring.
     Theme {
-        id:   ThemeId::Light,
-        name: "Light",
+        id: ThemeId::Light,
         bg:          Color32::from_rgb(252, 249, 243), // warm cream, not sterile white
         sidebar_bg:  Color32::from_rgb(241, 237, 228), // a notch darker, same warmth
         toolbar_bg:  Color32::from_rgb(232, 228, 218), // toolbar sits visually below sidebar
@@ -68,15 +65,13 @@ pub const THEMES: &[Theme] = &[
         code_bg:        Color32::from_rgb(230, 226, 216),
         inline_code_fg: Color32::from_rgb(172, 20, 92), // distinctive crimson
         separator:      Color32::from_rgb(200, 195, 184),
-        quote_bg:       Color32::from_rgb(230, 226, 216),
     },
 
     // ── Coal — "Graphite" ────────────────────────────────────────────────────
     // Refined warm charcoal. Not the cold blue-gray that plagues dark modes.
     // Like artist charcoal on smooth black paper.
     Theme {
-        id:   ThemeId::Coal,
-        name: "Coal",
+        id: ThemeId::Coal,
         bg:          Color32::from_rgb(18, 18, 20),   // near-black with warmth
         sidebar_bg:  Color32::from_rgb(26, 26, 29),   // subtle lift for sidebar
         toolbar_bg:  Color32::from_rgb(22, 22, 24),   // between bg and sidebar
@@ -90,15 +85,13 @@ pub const THEMES: &[Theme] = &[
         code_bg:        Color32::from_rgb(23, 23, 26),
         inline_code_fg: Color32::from_rgb(232, 168, 58), // warm amber on dark
         separator:      Color32::from_rgb(38, 38, 44),
-        quote_bg:       Color32::from_rgb(23, 23, 26),
     },
 
     // ── Navy — "Midnight Deep" ───────────────────────────────────────────────
     // Rich saturated ocean. Not washed-out steel blue — committed deep navy.
     // Bright cyan cuts through like bioluminescence.
     Theme {
-        id:   ThemeId::Navy,
-        name: "Navy",
+        id: ThemeId::Navy,
         bg:          Color32::from_rgb(18, 30, 58),    // saturated deep navy
         sidebar_bg:  Color32::from_rgb(10, 18, 38),    // darker abyss
         toolbar_bg:  Color32::from_rgb(13, 23, 45),    // between
@@ -112,15 +105,13 @@ pub const THEMES: &[Theme] = &[
         code_bg:        Color32::from_rgb(11, 20, 42),
         inline_code_fg: Color32::from_rgb(144, 214, 255), // softer cyan
         separator:      Color32::from_rgb(30, 46, 82),
-        quote_bg:       Color32::from_rgb(13, 23, 48),
     },
 
     // ── Ayu — "Ember" ────────────────────────────────────────────────────────
     // Near-void darkness with golden amber warmth. Staring into dying embers.
     // The contrast between cold darkness and warm fire is the whole point.
     Theme {
-        id:   ThemeId::Ayu,
-        name: "Ayu",
+        id: ThemeId::Ayu,
         bg:          Color32::from_rgb(10, 14, 20),    // deep void, slight blue-dark
         sidebar_bg:  Color32::from_rgb(15, 20, 29),    // subtle rise
         toolbar_bg:  Color32::from_rgb(11, 16, 23),    // between
@@ -134,10 +125,9 @@ pub const THEMES: &[Theme] = &[
         code_bg:        Color32::from_rgb(13, 18, 25),
         inline_code_fg: Color32::from_rgb(255, 152, 26),  // amber matches accent
         separator:      Color32::from_rgb(20, 28, 42),
-        quote_bg:       Color32::from_rgb(13, 18, 25),
     },
 ];
 
 pub fn theme_by_id(id: ThemeId) -> &'static Theme {
-    THEMES.iter().find(|t| t.id == id).unwrap()
+    THEMES.iter().find(|t| t.id == id).expect("ThemeId has no matching entry in THEMES")
 }

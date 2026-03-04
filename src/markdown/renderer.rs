@@ -1,3 +1,4 @@
+#![allow(clippy::too_many_arguments)]
 use egui::{Color32, Frame, FontId, RichText, TextFormat, Ui};
 use egui::text::LayoutJob;
 use egui_extras::{Column, TableBuilder};
@@ -32,13 +33,12 @@ pub fn render_markdown(
         let iy = *initial_y.get_or_insert(cursor.min.y);
 
         // Only track headings that appear in the outline (level <= 3).
-        if let Block::Heading(level, _) = block {
-            if *level <= 3 {
+        if let Block::Heading(level, _) = block
+            && *level <= 3 {
                 // Store content position relative to start of first block.
                 // This is stable across scroll frames.
                 heading_positions.push((i, cursor.min.y - iy));
             }
-        }
 
         let block_rect = egui::Rect::from_min_size(
             cursor.min,
@@ -188,7 +188,7 @@ fn render_block(
                 Color32::from_rgb(40, 40, 40) // Darker than faint_bg_color for dark themes
             };
 
-            Frame::canvas(&ui.style())
+            Frame::canvas(ui.style())
                 .fill(code_bg)
                 .inner_margin(egui::Margin::symmetric(12, 10))
                 .corner_radius(6.0)
@@ -321,7 +321,7 @@ fn render_block(
             // Simple table styling without zebra striping
             let header_bg = ui.visuals().widgets.active.bg_fill;
 
-            Frame::canvas(&ui.style())
+            Frame::canvas(ui.style())
                 .fill(ui.visuals().faint_bg_color)
                 .corner_radius(6.0)
                 .stroke(ui.visuals().widgets.noninteractive.bg_stroke)
@@ -424,7 +424,7 @@ fn render_inline(
             let occ_base    = *occurrence;
             let match_count = match_offs.len();
 
-            Frame::canvas(&ui.style())
+            Frame::canvas(ui.style())
                 .fill(ui.visuals().faint_bg_color)
                 .inner_margin(egui::Margin::symmetric(3, 1))
                 .corner_radius(3.0)
@@ -619,7 +619,7 @@ fn is_word_boundary(text: &str, start: usize, end: usize) -> bool {
     let is_wc  = |c: char| c.is_alphanumeric() || c == '_';
     let before = text[..start].chars().next_back();
     let after  = text[end..].chars().next();
-    before.map_or(true, |c| !is_wc(c)) && after.map_or(true, |c| !is_wc(c))
+    before.is_none_or(|c| !is_wc(c)) && after.is_none_or(|c| !is_wc(c))
 }
 
 /// Byte length of the (possibly lowercased) needle, for use when slicing matched text.

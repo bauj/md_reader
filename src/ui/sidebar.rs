@@ -35,13 +35,12 @@ fn collect_max_width(
     if total > *max_w {
         *max_w = total;
     }
-    if matches!(node.kind, FsNodeKind::Dir) && expanded.contains(&node.path) {
-        if let Some(ref children) = node.children {
+    if matches!(node.kind, FsNodeKind::Dir) && expanded.contains(&node.path)
+        && let Some(ref children) = node.children {
             for child in children {
                 collect_max_width(ctx, child, depth + 1, expanded, font_id, indent_px, max_w);
             }
         }
-    }
 }
 
 pub fn render_sidebar(ui: &mut Ui, tree: &mut FsTree, active_color: Color32) -> Option<PathBuf> {
@@ -76,7 +75,7 @@ fn fit_text(ctx: &egui::Context, text: &str, max_px: f32, font_id: &egui::FontId
     let mut lo = 0usize;
     let mut hi = chars.len();
     while lo < hi {
-        let mid = (lo + hi + 1) / 2;
+        let mid = (lo + hi).div_ceil(2);
         let s: String = chars[..mid].iter().collect();
         if measure(&s) <= target { lo = mid; } else { hi = mid - 1; }
     }
@@ -124,15 +123,14 @@ fn render_node(
                 }
             }
 
-            if is_expanded {
-                if let Some(ref children) = node.children {
+            if is_expanded
+                && let Some(ref children) = node.children {
                     ui.indent(&node.name, |ui| {
                         for child in children {
                             render_node(ui, child, expanded, selected, selected_file, to_expand, active_color);
                         }
                     });
                 }
-            }
         }
         FsNodeKind::File => {
             let is_selected = selected.as_ref() == Some(&node.path);

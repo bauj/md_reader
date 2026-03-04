@@ -414,7 +414,7 @@ impl App {
     /// Returns `true` if the app should quit immediately (Quit with no dirty tabs).
     fn request_action(&mut self, action: PendingAction) -> bool {
         let is_dirty = match &action {
-            PendingAction::CloseTab(idx) => self.tabs.get(*idx).map_or(false, |t| t.modified),
+            PendingAction::CloseTab(idx) => self.tabs.get(*idx).is_some_and(|t| t.modified),
             PendingAction::Quit          => self.tabs.iter().any(|t| t.modified),
         };
         if is_dirty {
@@ -501,20 +501,18 @@ impl eframe::App for App {
 
         if ctrl_b { self.sidebar_open = !self.sidebar_open; }
         if ctrl_s { self.save_active(); }
-        if ctrl_w {
-            if let Some(idx) = self.active_tab {
+        if ctrl_w
+            && let Some(idx) = self.active_tab {
                 self.request_action(PendingAction::CloseTab(idx));
             }
-        }
         if ctrl_q && self.request_action(PendingAction::Quit) {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
         if ctrl_n { self.create_new_file(); }
-        if ctrl_o {
-            if let Some(path) = rfd::FileDialog::new().pick_folder() {
+        if ctrl_o
+            && let Some(path) = rfd::FileDialog::new().pick_folder() {
                 self.add_root(path);
             }
-        }
         if ctrl_f {
             if self.search_open {
                 // Ctrl+F again → focus the bar already open
@@ -551,8 +549,8 @@ impl eframe::App for App {
             }
         }
 
-        if ctrl_left || ctrl_right {
-            if !self.tabs.is_empty() {
+        if (ctrl_left || ctrl_right)
+            && !self.tabs.is_empty() {
                 let cur  = self.active_tab.unwrap_or(0);
                 let next = if ctrl_right {
                     (cur + 1).min(self.tabs.len() - 1)
@@ -563,13 +561,12 @@ impl eframe::App for App {
                 let p = self.tabs[next].path.clone();
                 self.set_selected(Some(p));
             }
-        }
 
         // ── Drag-and-drop ──────────────────────────────────────────────────
         ctx.input(|i| {
             for file in &i.raw.dropped_files {
                 if let Some(path) = &file.path {
-                    if path.is_file() && path.extension().map_or(false, |e| e == "md") {
+                    if path.is_file() && path.extension().is_some_and(|e| e == "md") {
                         // Markdown file: open it
                         self.open_tab(path.clone());
                     } else if path.is_dir() {
@@ -592,12 +589,10 @@ impl eframe::App for App {
                                 if let Some(tab) = self.tabs.iter_mut().find(|t| &t.path == path) {
                                     if tab.modified {
                                         tab.extern_modified = true;
-                                    } else {
-                                        if let Ok(content) = std::fs::read_to_string(&tab.path) {
-                                            tab.buffer          = content;
-                                            tab.needs_reparse   = true;
-                                            tab.extern_modified = false;
-                                        }
+                                    } else if let Ok(content) = std::fs::read_to_string(&tab.path) {
+                                        tab.buffer          = content;
+                                        tab.needs_reparse   = true;
+                                        tab.extern_modified = false;
                                     }
                                 }
                             }
@@ -615,13 +610,12 @@ impl eframe::App for App {
         }
 
         // ── Re-parse active tab when needed ──────────────────────────────
-        if let Some(idx) = self.active_tab {
-            if self.tabs[idx].needs_reparse {
+        if let Some(idx) = self.active_tab
+            && self.tabs[idx].needs_reparse {
                 let doc = parse_markdown(&self.tabs[idx].buffer);
                 self.tabs[idx].parsed_doc    = Some(doc);
                 self.tabs[idx].needs_reparse = false;
             }
-        }
 
         // ── Unsaved-changes dialog ────────────────────────────────────────
         if self.pending_action.is_some() {
@@ -730,7 +724,7 @@ impl eframe::App for App {
         // Edit and Split only make sense for .md files.
         let active_is_md = self.active_tab
             .and_then(|i| self.tabs.get(i))
-            .map_or(true, |t| is_markdown(&t.path));
+            .is_none_or(|t| is_markdown(&t.path));
         if !active_is_md && self.view_mode != ViewMode::Preview {
             self.view_mode = ViewMode::Preview;
         }
@@ -752,11 +746,10 @@ impl eframe::App for App {
 
                 ui.separator();
 
-                if ui.button("Open Folder").on_hover_text("Open a folder in the sidebar").clicked() {
-                    if let Some(path) = rfd::FileDialog::new().pick_folder() {
+                if ui.button("Open Folder").on_hover_text("Open a folder in the sidebar").clicked()
+                    && let Some(path) = rfd::FileDialog::new().pick_folder() {
                         self.add_root(path);
                     }
-                }
 
                 // ── Recent files dropdown ─────────────────────────────────
                 let mut open_path: Option<PathBuf> = None;
@@ -817,7 +810,7 @@ impl eframe::App for App {
                 // Theme picker
                 ui.menu_button("Theme", |ui| {
                     for theme in crate::theme::THEMES {
-                        if ui.selectable_label(self.active_theme == theme.id, theme.name).clicked() {
+                        if ui.selectable_label(self.active_theme == theme.id, theme.id.name()).clicked() {
                             self.active_theme = theme.id;
                             ui.close_menu();
                         }
@@ -829,7 +822,7 @@ impl eframe::App for App {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let is_modified = self.active_tab
                         .and_then(|i| self.tabs.get(i))
-                        .map_or(false, |t| t.modified);
+                        .is_some_and(|t| t.modified);
                     let has_active = self.active_tab.is_some();
 
                     if ui.add_enabled(is_modified, egui::Button::new("Save"))
@@ -839,11 +832,10 @@ impl eframe::App for App {
                     }
                     if ui.add_enabled(has_active, egui::Button::new("Close"))
                         .on_hover_text("Close current file (Ctrl+W)")
-                        .clicked() {
-                        if let Some(idx) = self.active_tab {
+                        .clicked()
+                        && let Some(idx) = self.active_tab {
                             self.request_action(PendingAction::CloseTab(idx));
                         }
-                    }
                 });
             });
         });
@@ -923,7 +915,7 @@ impl eframe::App for App {
         // Shown when the active tab was changed on disk while we have local edits.
         let extern_mod = self.active_tab
             .and_then(|i| self.tabs.get(i))
-            .map_or(false, |t| t.extern_modified);
+            .is_some_and(|t| t.extern_modified);
 
         if extern_mod {
             let mut reload = false;
@@ -940,8 +932,8 @@ impl eframe::App for App {
                     if ui.button("Keep mine").clicked() { keep = true; }
                 });
             });
-            if reload {
-                if let Some(idx) = self.active_tab {
+            if reload
+                && let Some(idx) = self.active_tab {
                     let tab = &mut self.tabs[idx];
                     if let Ok(content) = std::fs::read_to_string(&tab.path) {
                         tab.buffer          = content;
@@ -950,12 +942,10 @@ impl eframe::App for App {
                         tab.extern_modified = false;
                     }
                 }
-            }
-            if keep {
-                if let Some(idx) = self.active_tab {
+            if keep
+                && let Some(idx) = self.active_tab {
                     self.tabs[idx].extern_modified = false;
                 }
-            }
         }
 
         // ── Sidebar ───────────────────────────────────────────────────────
@@ -1056,7 +1046,7 @@ impl eframe::App for App {
                         // Outline — only for .md files with a parsed doc
                         let has_doc = self.active_tab
                             .and_then(|i| self.tabs.get(i))
-                            .map_or(false, |t| t.parsed_doc.is_some() && is_markdown(&t.path));
+                            .is_some_and(|t| t.parsed_doc.is_some() && is_markdown(&t.path));
 
                         if has_doc {
                             let idx = self.active_tab.unwrap();
@@ -1066,9 +1056,7 @@ impl eframe::App for App {
                                 if tab.preview_at_bottom && !tab.heading_positions.is_empty() {
                                     tab.heading_positions.last().map(|(idx, _)| *idx)
                                 } else {
-                                    tab.heading_positions.iter()
-                                        .filter(|(_, y)| *y <= tab.preview_scroll_y)
-                                        .last()
+                                    tab.heading_positions.iter().rfind(|(_, y)| *y <= tab.preview_scroll_y)
                                         .map(|(idx, _)| *idx)
                                 }
                             });
@@ -1197,8 +1185,7 @@ impl eframe::App for App {
                         let zoom = self.content_zoom;
                         let tab  = &mut self.tabs[idx];
                         let hl   = &mut self.highlighter;
-                        let mut split_cursor: Option<(usize, usize)> = None;
-                        {
+                        let split_cursor = {
                         // Manual split layout — avoids ui.columns() which always splits 50/50.
                         let available = ui.available_rect_before_wrap();
                         let total_w   = available.width();
@@ -1243,13 +1230,13 @@ impl eframe::App for App {
 
                         // Only scroll the pane the pointer is hovering over (mirrors mouse-wheel behaviour).
                         let pointer = ctx.pointer_latest_pos();
-                        let left_scroll  = if pointer.map_or(false, |p| left_rect.contains(p))  { page_scroll } else { 0.0 };
-                        let right_scroll = if pointer.map_or(false, |p| right_rect.contains(p)) { page_scroll + arrow_scroll } else { 0.0 };
+                        let left_scroll  = if pointer.is_some_and(|p| left_rect.contains(p))  { page_scroll } else { 0.0 };
+                        let right_scroll = if pointer.is_some_and(|p| right_rect.contains(p)) { page_scroll + arrow_scroll } else { 0.0 };
 
                         // Render editor and preview as bounded children.
                         // On mode switch, restore each pane's last known position.
-                        let editor_sync  = mode_switched.then(|| tab.editor_scroll_y);
-                        let preview_sync = mode_switched.then(|| tab.preview_scroll_y);
+                        let editor_sync  = mode_switched.then_some(tab.editor_scroll_y);
+                        let preview_sync = mode_switched.then_some(tab.preview_scroll_y);
 
                         let mut left_ui = ui.new_child(egui::UiBuilder::new().max_rect(left_rect));
                         let (ecursor, eoffset) = render_editor(
@@ -1267,7 +1254,6 @@ impl eframe::App for App {
                             editor_sync,
                             zoom,
                         );
-                        split_cursor = ecursor;
                         tab.editor_scroll_y = eoffset;
 
                         let mut right_ui = ui.new_child(egui::UiBuilder::new().max_rect(right_rect));
@@ -1296,7 +1282,8 @@ impl eframe::App for App {
 
                         // Advance parent cursor to cover the full area we occupied
                         ui.advance_cursor_after_rect(available);
-                        }
+                        ecursor
+                        };
                         self.cursor_pos = split_cursor;
                     }
                 },
@@ -1390,6 +1377,7 @@ impl eframe::App for App {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_preview(
     ui:             &mut egui::Ui,
     doc:            &Option<ParsedDoc>,
@@ -1409,7 +1397,7 @@ fn render_preview(
     // not narrow the clip rect — only max_rect is set to the column's allocated rect.
     // Reading max_rect here (before the scroll area) is stable; it won't grow later.
     let viewport_w = ui.max_rect().width();
-    let content_w  = (viewport_w - 48.0).min(820.0).max(200.0);
+    let content_w  = (viewport_w - 48.0).clamp(200.0, 820.0);
     let side_pad   = ((viewport_w - content_w) / 2.0).max(24.0);
 
     let mut sa = ScrollArea::vertical()
@@ -1476,10 +1464,6 @@ fn render_preview(
     (out.inner.0, out.state.offset.y, out.inner.1, is_at_bottom)
 }
 
-/// Returns the current cursor position as `Some((line, col))` (both 1-indexed)
-/// when the TextEdit is focused, or `None` otherwise.
-/// Returns the current cursor position as `Some((line, col))` (both 1-indexed)
-/// when the TextEdit is focused, or `None` otherwise.
 /// Apply Tab indent or Shift+Tab unindent to the editor buffer based on the current cursor/selection.
 /// Updates egui's TextEditState so the cursor follows the edit.  Returns true if the buffer changed.
 fn editor_apply_indent(
@@ -1593,6 +1577,7 @@ fn editor_apply_indent(
     true
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_editor(
     ui:               &mut egui::Ui,
     buffer:           &mut String,
@@ -1906,8 +1891,6 @@ fn apply_theme(ctx: &egui::Context, theme_id: ThemeId) {
     let theme = crate::theme::theme_by_id(theme_id);
 
     // Base visuals on content-area luminance — not theme name.
-    // Rust has a light parchment content area, so it gets light() as base even
-    // though its sidebar/toolbar are dark.
     let is_dark_content = luma(theme.bg) < 128.0;
     let mut visuals = if is_dark_content {
         egui::Visuals::dark()
@@ -1987,12 +1970,9 @@ fn apply_theme(ctx: &egui::Context, theme_id: ThemeId) {
     style.spacing.scroll.bar_width       = 7.0;
     style.spacing.scroll.bar_inner_margin = 2.0;
 
-    style.text_styles.get_mut(&egui::TextStyle::Body)
-        .map(|f| f.size = 16.0);
-    style.text_styles.get_mut(&egui::TextStyle::Small)
-        .map(|f| f.size = 12.0);
-    style.text_styles.get_mut(&egui::TextStyle::Button)
-        .map(|f| f.size = 13.0);
+    if let Some(f) = style.text_styles.get_mut(&egui::TextStyle::Body)   { f.size = 16.0; }
+    if let Some(f) = style.text_styles.get_mut(&egui::TextStyle::Small)  { f.size = 12.0; }
+    if let Some(f) = style.text_styles.get_mut(&egui::TextStyle::Button) { f.size = 13.0; }
 
     ctx.set_style(style);
 }
@@ -2085,7 +2065,10 @@ fn toggle_task_in_buffer(buffer: &mut String, index: usize) {
         if let Some(cb_off) = task_checkbox_offset(line) {
             if count == index {
                 let abs = byte_pos + cb_off + 1; // +1: skip '[', point at ' ' or 'x'
-                let new_ch = if buffer.as_bytes()[abs] == b' ' { 'x' } else { ' ' };
+                let new_ch = match buffer.as_bytes().get(abs) {
+                    Some(&b' ') => 'x',
+                    _           => ' ',
+                };
                 buffer.replace_range(abs..abs + 1, &new_ch.to_string());
                 return;
             }

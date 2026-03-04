@@ -8,7 +8,9 @@ mod ui;
 use app::App;
 
 fn main() -> Result<(), eframe::Error> {
-    let initial_path = std::env::args().nth(1).map(std::path::PathBuf::from);
+    let initial_path = std::env::args().nth(1)
+        .map(std::path::PathBuf::from)
+        .map(|p| p.canonicalize().unwrap_or(p));
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()

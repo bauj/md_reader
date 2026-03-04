@@ -2,6 +2,15 @@
 name = "md_reader"
 version = "0.1.0"
 edition = "2024"
+authors = ["hjuba"]
+description = "A fast, native markdown reader and editor with live preview, syntax highlighting, and multi-file support"
+license = "MIT"
+repository = "https://github.com/hjuba/md_reader"
+homepage = "https://github.com/hjuba/md_reader"
+readme = "README.md"
+keywords = ["markdown", "editor", "preview", "gui", "reader"]
+categories = ["text-editors", "visualization"]
+exclude = [".claude/"]
 
 [dependencies]
 eframe = "0.31"

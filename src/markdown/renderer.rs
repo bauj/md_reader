@@ -131,10 +131,7 @@ fn render_block(
             let light_bg = luminance > 128.0;
             let lines    = hl.highlight(lang, code, light_bg);
             let mut job  = LayoutJob::default();
-            // Limit the galley to the available column width (frame inner-margin = 12px each side).
-            // Without this the LayoutJob requests its natural line width and widens the block.
-            job.wrap.max_width   = (ui.available_width() - 24.0).max(100.0);
-            job.wrap.break_anywhere = true;
+            job.wrap.max_width = f32::INFINITY; // no wrapping — horizontal scroll instead
             let mut bpos = 0usize; // byte cursor within `code`
 
             for line_spans in lines {
@@ -223,8 +220,21 @@ fn render_block(
                     ui.add_space(4.0);
                     ui.separator();
                     ui.add_space(4.0);
-                    
-                    ui.label(job);
+
+                    egui::ScrollArea::horizontal()
+                        .id_salt(("cb", occ_base))
+                        .auto_shrink([false, true])
+                        .show(ui, |ui| {
+                            // Lay out the galley explicitly so its natural width is
+                            // used for allocation (Label::show would re-wrap at
+                            // available_width, defeating the scroll area).
+                            let galley = ui.fonts(|f| f.layout_job(job));
+                            let size   = galley.size();
+                            let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
+                            if ui.is_rect_visible(rect) {
+                                ui.painter().galley(rect.min, galley, Color32::WHITE);
+                            }
+                        });
                 });
         }
 
@@ -338,8 +348,34 @@ fn render_block(
             // multiple &mut borrows to the same variable.
             let occ = std::cell::Cell::new(*occurrence);
 
-            // Simple table styling without zebra striping
             let header_bg = ui.visuals().widgets.active.bg_fill;
+
+            // Measure the widest no-wrap content in each column.
+            let body_fid = egui::FontId::new(14.0 * zoom, body_font.clone());
+            let code_fid = egui::FontId::monospace(13.0 * zoom);
+            let measure_cell = |inlines: &Vec<Inline>| -> f32 {
+                inlines.iter().map(|il| match il {
+                    Inline::Code(c) => ui.fonts(|f|
+                        f.layout_no_wrap(c.to_string(), code_fid.clone(), Color32::WHITE).size().x
+                    ) + 6.0,
+                    Inline::Text(t) | Inline::Bold(t) | Inline::Italic(t) | Inline::BoldItalic(t) =>
+                        ui.fonts(|f|
+                            f.layout_no_wrap(t.to_string(), body_fid.clone(), Color32::WHITE).size().x
+                        ),
+                    Inline::Link(text, _) => ui.fonts(|f|
+                        f.layout_no_wrap(text.to_string(), body_fid.clone(), Color32::WHITE).size().x
+                    ),
+                    Inline::Image(_, _) => 40.0,
+                }).sum::<f32>() + 8.0 // cell h-padding
+            };
+            let col_content_w: Vec<f32> = (0..col_count).map(|ci| {
+                let hw = headers.get(ci).map_or(0.0, &measure_cell);
+                rows.iter()
+                    .filter_map(|r| r.get(ci))
+                    .map(&measure_cell)
+                    .fold(hw, f32::max)
+                    .max(60.0)
+            }).collect();
 
             Frame::canvas(ui.style())
                 .fill(ui.visuals().faint_bg_color)
@@ -351,55 +387,68 @@ fn render_block(
                     ui.set_max_width(w);
 
                     let spacing_x = ui.spacing().item_spacing.x;
-                    let col_width = ((w - spacing_x * (col_count as f32 - 1.0)) / col_count as f32).max(0.0);
+                    let spacing_total = spacing_x * (col_count as f32 - 1.0).max(0.0);
+                    let content_sum: f32 = col_content_w.iter().sum();
 
-                    TableBuilder::new(ui)
-                        .striped(false) // Disable zebra striping
-                        .columns(Column::exact(col_width), col_count)
-                        .header(28.0, |mut row| {
-                            for header_inlines in headers {
-                                row.col(|ui| {
-                                    // Fill the full cell rect as the header background
-                                    ui.painter().rect_filled(ui.max_rect(), 0.0, header_bg);
-                                    // Vertical centering: push content down by half the slack
-                                    let text_h = ui.text_style_height(&egui::TextStyle::Body);
-                                    let vpad = ((ui.available_height() - text_h) / 2.0).max(2.0);
-                                    ui.add_space(vpad);
-                                    // Horizontal centering via top-down centered layout
-                                    ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
-                                        ui.set_width(ui.available_width());
-                                        ui.spacing_mut().item_spacing.y = 0.0;
-                                        let mut o = occ.get();
-                                        for il in header_inlines {
-                                            render_inline(ui, il, None, true, search_query, search_current, opts, zoom, body_font, &mut o);
-                                        }
-                                        occ.set(o);
-                                    });
-                                });
+                    // Scale columns up to fill available width when content fits;
+                    // otherwise use raw content widths and let the ScrollArea scroll.
+                    let col_widths: Vec<f32> = if content_sum + spacing_total <= w {
+                        let scale = (w - spacing_total) / content_sum;
+                        col_content_w.iter().map(|&cw| cw * scale).collect()
+                    } else {
+                        col_content_w.clone()
+                    };
+
+                    egui::ScrollArea::horizontal()
+                        .id_salt(*occurrence)
+                        .auto_shrink([false, true])
+                        .show(ui, |ui| {
+                            let mut builder = TableBuilder::new(ui).striped(false);
+                            for &cw in &col_widths {
+                                builder = builder.column(Column::exact(cw));
                             }
-                        })
-                        .body(|mut body| {
-                            for data_row in rows {
-                                body.row(24.0, |mut row| {
-                                    for cell_inlines in data_row.iter() {
+                            builder
+                                .header(28.0, |mut row| {
+                                    for header_inlines in headers {
                                         row.col(|ui| {
-                                            // Simple cell without alternating background
-                                            ui.horizontal_wrapped(|ui| {
-                                                ui.spacing_mut().item_spacing.y = 16.0;
+                                            ui.painter().rect_filled(ui.max_rect(), 0.0, header_bg);
+                                            let text_h = ui.text_style_height(&egui::TextStyle::Body);
+                                            let vpad = ((ui.available_height() - text_h) / 2.0).max(2.0);
+                                            ui.add_space(vpad);
+                                            ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+                                                ui.set_width(ui.available_width());
+                                                ui.spacing_mut().item_spacing.y = 0.0;
                                                 let mut o = occ.get();
-                                                for il in cell_inlines {
-                                                    render_inline(ui, il, None, false, search_query, search_current, opts, zoom, body_font, &mut o);
+                                                for il in header_inlines {
+                                                    render_inline(ui, il, None, true, search_query, search_current, opts, zoom, body_font, &mut o);
                                                 }
                                                 occ.set(o);
                                             });
                                         });
                                     }
-                                    for _ in data_row.len()..col_count {
-                                        row.col(|_| {});
+                                })
+                                .body(|mut body| {
+                                    for data_row in rows {
+                                        body.row(24.0, |mut row| {
+                                            for cell_inlines in data_row.iter() {
+                                                row.col(|ui| {
+                                                    ui.horizontal_wrapped(|ui| {
+                                                        ui.spacing_mut().item_spacing.y = 16.0;
+                                                        let mut o = occ.get();
+                                                        for il in cell_inlines {
+                                                            render_inline(ui, il, None, false, search_query, search_current, opts, zoom, body_font, &mut o);
+                                                        }
+                                                        occ.set(o);
+                                                    });
+                                                });
+                                            }
+                                            for _ in data_row.len()..col_count {
+                                                row.col(|_| {});
+                                            }
+                                        });
                                     }
                                 });
-                            }
-                        });
+                        }); // ScrollArea
                 });
 
             *occurrence = occ.get();

@@ -192,6 +192,7 @@ fn render_block(
                 .fill(code_bg)
                 .inner_margin(egui::Margin::symmetric(12, 10))
                 .corner_radius(6.0)
+                .stroke(egui::Stroke::NONE)
                 .show(ui, |ui| {
                     let w = ui.available_width();
                     ui.set_min_width(w);

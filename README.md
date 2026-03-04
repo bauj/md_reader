@@ -80,3 +80,12 @@ cargo build --release
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+## Fonts
+
+The following fonts are embedded in the binary under the [SIL Open Font License 1.1](https://openfontlicense.org):
+
+- [JetBrains Mono](https://www.jetbrains.com/legalnotice/jetbrainsmono/) — used for code blocks and the editor
+- [Noto Sans Bold](https://fonts.google.com/noto) — used for bold text in the markdown renderer
+
+License texts are included in [`assets/fonts/licenses/`](assets/fonts/licenses/).

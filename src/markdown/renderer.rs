@@ -227,31 +227,48 @@ fn render_block(
         }
 
         Block::BlockQuote(inlines) => {
-            ui.horizontal(|ui| {
-                // Thicker left border with theme color
-                let border_width = 4.0;
-                let border_color = ui.visuals().widgets.active.bg_fill;
-                let (rect, _) = ui.allocate_exact_size(
-                    egui::vec2(border_width, ui.spacing().interact_size.y.max(24.0)),
-                    egui::Sense::hover(),
-                );
-                ui.painter().rect_filled(rect, border_width, border_color);
-                
-                ui.add_space(12.0); // Increased spacing between border and text
-                
-                ui.vertical(|ui| {
+            let border_width = 4.0;
+            let border_color = ui.visuals().widgets.active.bg_fill;
+
+            let bg_color = {
+                let c = ui.visuals().panel_fill;
+                egui::Color32::from_rgba_unmultiplied(
+                    c.r().saturating_sub(5),
+                    c.g().saturating_sub(5),
+                    c.b().saturating_sub(5),
+                    180,
+                )
+            };
+
+            // egui::Frame pre-allocates a shape slot internally so the background
+            // is always painted behind the content, regardless of content height.
+            let frame_resp = egui::Frame::new()
+                .fill(bg_color)
+                .inner_margin(egui::Margin {
+                    left: (border_width + 12.0) as i8,
+                    right: 4,
+                    top: 4,
+                    bottom: 4,
+                })
+                .show(ui, |ui| {
                     ui.horizontal_wrapped(|ui| {
-                        ui.spacing_mut().item_spacing.y = 18.0; // Better line height
-                        // Italicize blockquote text by using a muted color
-                        let original_fg = ui.visuals().text_color();
-                        ui.visuals_mut().override_text_color = Some(ui.visuals().weak_text_color());
+                        ui.spacing_mut().item_spacing.y = 18.0;
+                        ui.visuals_mut().override_text_color =
+                            Some(ui.visuals().weak_text_color());
                         for inline in inlines {
                             render_inline(ui, inline, None, false, search_query, search_current, opts, zoom, occurrence);
                         }
-                        ui.visuals_mut().override_text_color = Some(original_fg);
                     });
                 });
-            });
+
+            // Draw the left accent border on top of the frame background.
+            // It sits at the left edge and doesn't overlap any text.
+            let rect = frame_resp.response.rect;
+            ui.painter().rect_filled(
+                egui::Rect::from_min_max(rect.min, egui::pos2(rect.min.x + border_width, rect.max.y)),
+                2.0,
+                border_color,
+            );
         }
 
         Block::List(ordered, items) => {

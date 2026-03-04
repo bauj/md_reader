@@ -94,11 +94,11 @@ pub fn parse_markdown(text: &str) -> ParsedDoc {
                 ctx = Ctx::Heading(level as u32);
             }
             Event::Start(Tag::Paragraph) => {
-                if list_stack.is_empty() {
+                if list_stack.is_empty() && ctx != Ctx::BlockQuote {
                     current_inlines.clear();
                     ctx = Ctx::Paragraph;
                 }
-                // inside a list item: let inlines keep accumulating into current_inlines
+                // inside a list item or blockquote: let inlines keep accumulating
             }
             Event::Start(Tag::BlockQuote(_)) => {
                 current_inlines.clear();
@@ -158,9 +158,8 @@ pub fn parse_markdown(text: &str) -> ParsedDoc {
                 } else if ctx == Ctx::Paragraph {
                     blocks.push(Block::Paragraph(std::mem::take(&mut current_inlines)));
                     ctx = Ctx::None;
-                } else if ctx == Ctx::BlockQuote {
-                    ctx = Ctx::None;
                 }
+                // ctx == BlockQuote: leave inlines and ctx alone; End(BlockQuote) will collect them
             }
             Event::End(TagEnd::BlockQuote(..)) => {
                 blocks.push(Block::BlockQuote(std::mem::take(&mut current_inlines)));

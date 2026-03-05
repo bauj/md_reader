@@ -180,6 +180,9 @@ pub struct App {
 
     // Whether the file-tree sidebar is visible.
     sidebar_open: bool,
+
+    // Fraction of sidebar height given to the file-tree panel (resizable divider).
+    file_panel_ratio: f32,
 }
 
 impl Default for App {
@@ -220,6 +223,7 @@ impl App {
             recalc_sidebar_width: false,
             content_zoom:         1.0,
             sidebar_open:         true,
+            file_panel_ratio:     0.25,
         };
 
         if let Some(path) = initial_path {
@@ -1048,7 +1052,16 @@ impl eframe::App for App {
                 // theme.fg (dark ink) which is invisible on dark-sidebar themes like Rust.
                 ui.visuals_mut().override_text_color = Some(theme.sidebar_fg);
 
+                // ── File-tree panel (resizable) ───────────────────────────
+                let available_h = ui.available_height();
+                let handle_h    = 6.0_f32;
+                let file_h      = (available_h * self.file_panel_ratio)
+                    .max(50.0)
+                    .min(available_h - handle_h - 50.0);
+
                 ScrollArea::vertical()
+                    .id_salt("file_panel")
+                    .max_height(file_h)
                     .auto_shrink([false; 2])
                     .show(ui, |ui| {
                         let mut open_path:  Option<PathBuf> = None;
@@ -1108,25 +1121,57 @@ impl eframe::App for App {
 
                         if let Some(path) = open_path  { self.open_tab(path); }
                         if let Some(i) = close_root     { self.roots.remove(i); }
+                    });
 
-                        // Outline — only for .md files with a parsed doc
-                        let has_doc = self.active_tab
-                            .and_then(|i| self.tabs.get(i))
-                            .is_some_and(|t| t.parsed_doc.is_some() && is_markdown(&t.path));
+                // ── Resize handle ─────────────────────────────────────────
+                let (handle_rect, handle_resp) = ui.allocate_exact_size(
+                    egui::vec2(ui.available_width(), handle_h),
+                    egui::Sense::drag(),
+                );
+                let sep_color = ui.visuals().widgets.noninteractive.bg_stroke.color;
+                ui.painter().hline(
+                    handle_rect.x_range(),
+                    handle_rect.center().y,
+                    egui::Stroke::new(1.0, sep_color),
+                );
+                if handle_resp.hovered() || handle_resp.dragged() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
+                    ui.painter().hline(
+                        handle_rect.x_range(),
+                        handle_rect.center().y,
+                        egui::Stroke::new(2.0, theme.sidebar_active),
+                    );
+                }
+                if handle_resp.dragged() {
+                    let new_file_h = (file_h + handle_resp.drag_delta().y)
+                        .max(50.0)
+                        .min(available_h - handle_h - 50.0);
+                    self.file_panel_ratio = new_file_h / available_h;
+                }
 
-                        if has_doc {
-                            let idx = self.active_tab.unwrap();
+                // ── Outline panel ─────────────────────────────────────────
+                // Outline — only for .md files with a parsed doc
+                let has_doc = self.active_tab
+                    .and_then(|i| self.tabs.get(i))
+                    .is_some_and(|t| t.parsed_doc.is_some() && is_markdown(&t.path));
+
+                if has_doc {
+                    let idx = self.active_tab.unwrap();
+                    let active_blk = self.active_tab.and_then(|i| {
+                        let tab = &self.tabs[i];
+                        if tab.preview_at_bottom && !tab.heading_positions.is_empty() {
+                            tab.heading_positions.last().map(|(idx, _)| *idx)
+                        } else {
+                            tab.heading_positions.iter().rfind(|(_, y)| *y <= tab.preview_scroll_y)
+                                .map(|(idx, _)| *idx)
+                        }
+                    });
+                    let last_active = self.tabs[idx].last_active_outline_block;
+                    ScrollArea::vertical()
+                        .id_salt("outline_panel")
+                        .auto_shrink([false; 2])
+                        .show(ui, |ui| {
                             let doc = self.tabs[idx].parsed_doc.as_ref().unwrap();
-                            let active_blk = self.active_tab.and_then(|i| {
-                                let tab = &self.tabs[i];
-                                if tab.preview_at_bottom && !tab.heading_positions.is_empty() {
-                                    tab.heading_positions.last().map(|(idx, _)| *idx)
-                                } else {
-                                    tab.heading_positions.iter().rfind(|(_, y)| *y <= tab.preview_scroll_y)
-                                        .map(|(idx, _)| *idx)
-                                }
-                            });
-                            let last_active = self.tabs[idx].last_active_outline_block;
                             if let Some(block_idx) = render_outline(
                                 ui,
                                 doc,
@@ -1138,9 +1183,9 @@ impl eframe::App for App {
                             ) {
                                 self.scroll_to_block = Some(block_idx);
                             }
-                            self.tabs[idx].last_active_outline_block = active_blk;
-                        }
-                    });
+                        });
+                    self.tabs[idx].last_active_outline_block = active_blk;
+                }
             });
 
         // ── Status bar ────────────────────────────────────────────────────

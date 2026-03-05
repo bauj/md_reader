@@ -1510,7 +1510,7 @@ fn render_preview(
     // not narrow the clip rect — only max_rect is set to the column's allocated rect.
     // Reading max_rect here (before the scroll area) is stable; it won't grow later.
     let viewport_w = ui.max_rect().width();
-    let content_w  = (viewport_w - 48.0).clamp(200.0, 820.0);
+    let content_w  = (viewport_w - 48.0).clamp(200.0, 900.0);
     let side_pad   = ((viewport_w - content_w) / 2.0).max(24.0);
 
     let mut sa = ScrollArea::vertical()

@@ -101,6 +101,7 @@ fn render_block(
                 _ => 14.0,  // H6+
             };
             ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing.x = 0.0;
                 for inline in inlines {
                     render_inline(ui, inline, Some(size), true, search_query, search_current, opts, zoom, body_font, occurrence);
                 }
@@ -112,6 +113,7 @@ fn render_block(
 
         Block::Paragraph(inlines) => {
             ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing.x = 0.0;
                 ui.spacing_mut().item_spacing.y = 18.0; // Increased line height within paragraphs
                 for inline in inlines {
                     render_inline(ui, inline, None, false, search_query, search_current, opts, zoom, body_font, occurrence);
@@ -260,6 +262,7 @@ fn render_block(
                 })
                 .show(ui, |ui| {
                     ui.horizontal_wrapped(|ui| {
+                        ui.spacing_mut().item_spacing.x = 0.0;
                         ui.spacing_mut().item_spacing.y = 18.0;
                         ui.visuals_mut().override_text_color =
                             Some(ui.visuals().weak_text_color());
@@ -311,6 +314,7 @@ fn render_block(
                     ui.vertical(|ui| {
                         if !item.inlines.is_empty() {
                             ui.horizontal_wrapped(|ui| {
+                                ui.spacing_mut().item_spacing.x = 0.0;
                                 ui.spacing_mut().item_spacing.y = 16.0;
                                 for inline in &item.inlines {
                                     render_inline(ui, inline, None, false, search_query, search_current, opts, zoom, body_font, occurrence);
@@ -429,6 +433,7 @@ fn render_block(
                                             for cell_inlines in data_row.iter() {
                                                 row.col(|ui| {
                                                     ui.horizontal_wrapped(|ui| {
+                                                        ui.spacing_mut().item_spacing.x = 0.0;
                                                         ui.spacing_mut().item_spacing.y = 16.0;
                                                         let mut o = occ.get();
                                                         for il in cell_inlines {
@@ -496,7 +501,10 @@ fn render_inline(
 
             // Reserve a painter slot so the background rect is drawn behind the
             // selectable label (painter slots execute in insertion order).
+            // We add h_pad space first so the background's left expansion lands
+            // in that gap rather than overlapping the preceding character.
             let bg_shape = ui.painter().add(egui::Shape::Noop);
+            ui.add_space(h_pad);
 
             let widget_text: egui::WidgetText = if match_offs.is_empty() {
                 egui::RichText::new(c.as_str()).font(font_id).color(fg).into()

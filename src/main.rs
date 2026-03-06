@@ -1,6 +1,7 @@
 mod app;
 mod fs;
 mod markdown;
+mod pdf_export;
 mod persist;
 mod theme;
 mod ui;

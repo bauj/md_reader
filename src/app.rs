@@ -184,6 +184,9 @@ pub struct App {
     // Fraction of sidebar height given to the file-tree panel (resizable divider).
     file_panel_ratio: f32,
 
+    // When true, open a save-file dialog and export the active doc as PDF.
+    pending_export_pdf: bool,
+
     // Track last-applied theme and title to avoid redundant egui calls that
     // trigger repaints every frame.
     last_applied_theme: Option<ThemeId>,
@@ -229,6 +232,7 @@ impl App {
             content_zoom:         1.0,
             sidebar_open:         true,
             file_panel_ratio:     0.25,
+            pending_export_pdf:   false,
             last_applied_theme:   None,
             last_window_title:    String::new(),
         };
@@ -906,6 +910,18 @@ impl eframe::App for App {
                     }
                 }).response.on_hover_text("Choose preview body font");
 
+                // Export PDF (only when a parsed doc is available)
+                let has_parsed_doc = self.active_tab
+                    .and_then(|i| self.tabs.get(i))
+                    .and_then(|t| t.parsed_doc.as_ref())
+                    .is_some();
+                if ui.add_enabled(has_parsed_doc, egui::Button::new("Export PDF"))
+                    .on_hover_text("Export current document as PDF")
+                    .clicked()
+                {
+                    self.pending_export_pdf = true;
+                }
+
                 ui.separator();
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1499,6 +1515,30 @@ impl eframe::App for App {
             if close {
                 self.search_open = false;
                 self.search_matches.clear();
+            }
+        }
+
+        // ── PDF export ────────────────────────────────────────────────────
+        if self.pending_export_pdf {
+            self.pending_export_pdf = false;
+            if let Some(idx) = self.active_tab {
+                if let Some(doc) = self.tabs.get(idx).and_then(|t| t.parsed_doc.as_ref()).cloned() {
+                    let default_name = self.tabs[idx].path
+                        .file_stem()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .to_string()
+                        + ".pdf";
+                    if let Some(dest) = rfd::FileDialog::new()
+                        .set_file_name(&default_name)
+                        .add_filter("PDF", &["pdf"])
+                        .save_file()
+                    {
+                        if let Err(e) = crate::pdf_export::export_pdf(&doc, &dest) {
+                            eprintln!("PDF export failed: {e}");
+                        }
+                    }
+                }
             }
         }
     }

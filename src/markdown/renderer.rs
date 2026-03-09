@@ -1,4 +1,5 @@
 #![allow(clippy::too_many_arguments)]
+use std::collections::HashMap;
 use egui::{Color32, Frame, FontId, RichText, TextFormat, Ui};
 use egui::text::LayoutJob;
 use egui_extras::{Column, TableBuilder};
@@ -16,7 +17,8 @@ pub fn render_markdown(
     opts:           SearchOpts,
     zoom:           f32,
     body_font:      &egui::FontFamily,
-) -> (Option<usize>, Vec<(usize, f32)>) {
+) -> (Option<usize>, Vec<(usize, f32)>, Option<usize>) {
+    let footnote_map = &doc.footnote_map;
     // Capture content width ONCE before any block renders.
     // At this point max_rect still reflects the original content_rect from render_preview.
     // We use this to give every block a fresh bounded max_rect so that overflow from
@@ -28,6 +30,7 @@ pub fn render_markdown(
     let mut toggled:           Option<usize>      = None;
     let mut initial_y:         Option<f32>        = None;
     let mut heading_positions: Vec<(usize, f32)>  = Vec::new();
+    let mut scroll_request:    Option<usize>      = None;
 
     for (i, block) in doc.blocks.iter().enumerate() {
         let cursor = ui.cursor();
@@ -60,7 +63,7 @@ pub fn render_markdown(
             block_ui.scroll_to_cursor(Some(egui::Align::TOP));
         }
 
-        render_block(&mut block_ui, block, hl, search_query, search_current, opts, zoom, body_font, &mut occurrence, &mut task_occ, &mut toggled);
+        render_block(&mut block_ui, block, hl, search_query, search_current, opts, zoom, body_font, &mut occurrence, &mut task_occ, &mut toggled, footnote_map, &mut scroll_request);
 
         // Advance the parent cursor: full rendered height, width clamped to content_w.
         // This prevents layout overflow from ever reaching the parent UI.
@@ -74,7 +77,7 @@ pub fn render_markdown(
         ui.add_space(12.0);
     }
 
-    (toggled, heading_positions)
+    (toggled, heading_positions, scroll_request)
 }
 
 fn render_block(
@@ -89,6 +92,8 @@ fn render_block(
     occurrence:     &mut usize,
     task_occ:       &mut usize,
     toggled:        &mut Option<usize>,
+    footnote_map:   &HashMap<String, (usize, usize, usize)>,
+    scroll_request: &mut Option<usize>,
 ) {
     match block {
         Block::Heading(level, inlines) => {
@@ -103,7 +108,7 @@ fn render_block(
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
                 for inline in inlines {
-                    render_inline(ui, inline, Some(size), true, search_query, search_current, opts, zoom, body_font, occurrence);
+                    render_inline(ui, inline, Some(size), true, search_query, search_current, opts, zoom, body_font, occurrence, footnote_map, scroll_request);
                 }
             });
             if *level <= 2 {
@@ -116,7 +121,7 @@ fn render_block(
                 ui.spacing_mut().item_spacing.x = 0.0;
                 ui.spacing_mut().item_spacing.y = 18.0; // Increased line height within paragraphs
                 for inline in inlines {
-                    render_inline(ui, inline, None, false, search_query, search_current, opts, zoom, body_font, occurrence);
+                    render_inline(ui, inline, None, false, search_query, search_current, opts, zoom, body_font, occurrence, footnote_map, scroll_request);
                 }
             });
         }
@@ -267,7 +272,7 @@ fn render_block(
                         ui.visuals_mut().override_text_color =
                             Some(ui.visuals().weak_text_color());
                         for inline in inlines {
-                            render_inline(ui, inline, None, false, search_query, search_current, opts, zoom, body_font, occurrence);
+                            render_inline(ui, inline, None, false, search_query, search_current, opts, zoom, body_font, occurrence, footnote_map, scroll_request);
                         }
                     });
                 });
@@ -317,7 +322,7 @@ fn render_block(
                                 ui.spacing_mut().item_spacing.x = 0.0;
                                 ui.spacing_mut().item_spacing.y = 16.0;
                                 for inline in &item.inlines {
-                                    render_inline(ui, inline, None, false, search_query, search_current, opts, zoom, body_font, occurrence);
+                                    render_inline(ui, inline, None, false, search_query, search_current, opts, zoom, body_font, occurrence, footnote_map, scroll_request);
                                 }
                             });
                         }
@@ -330,7 +335,7 @@ fn render_block(
                         ui.add_space(36.0);
                         ui.vertical(|ui| {
                             for child in &item.children {
-                                render_block(ui, child, hl, search_query, search_current, opts, zoom, body_font, occurrence, task_occ, toggled);
+                                render_block(ui, child, hl, search_query, search_current, opts, zoom, body_font, occurrence, task_occ, toggled, footnote_map, scroll_request);
                             }
                         });
                     });
@@ -366,6 +371,7 @@ fn render_block(
                         f.layout_no_wrap(text.to_string(), body_fid.clone(), Color32::WHITE).size().x
                     ),
                     Inline::Image(_, _) => 40.0,
+                    Inline::FootnoteRef(_) => 20.0,
                 }).sum::<f32>() + 8.0 // cell h-padding
             };
             let col_content_w: Vec<f32> = (0..col_count).map(|ci| {
@@ -420,7 +426,7 @@ fn render_block(
                                                 ui.spacing_mut().item_spacing.y = 0.0;
                                                 let mut o = occ.get();
                                                 for il in header_inlines {
-                                                    render_inline(ui, il, None, true, search_query, search_current, opts, zoom, body_font, &mut o);
+                                                    render_inline(ui, il, None, true, search_query, search_current, opts, zoom, body_font, &mut o, footnote_map, scroll_request);
                                                 }
                                                 occ.set(o);
                                             });
@@ -437,7 +443,7 @@ fn render_block(
                                                         ui.spacing_mut().item_spacing.y = 16.0;
                                                         let mut o = occ.get();
                                                         for il in cell_inlines {
-                                                            render_inline(ui, il, None, false, search_query, search_current, opts, zoom, body_font, &mut o);
+                                                            render_inline(ui, il, None, false, search_query, search_current, opts, zoom, body_font, &mut o, footnote_map, scroll_request);
                                                         }
                                                         occ.set(o);
                                                     });
@@ -458,6 +464,35 @@ fn render_block(
         Block::Rule => {
             ui.separator();
         }
+
+        Block::FootnoteDef(label, content) => {
+            if let Some(&(number, _, ref_block_idx)) = footnote_map.get(label) {
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing.x = 0.0;
+                    ui.label(
+                        RichText::new(format!("[{}] ", number))
+                            .size(12.0 * zoom)
+                            .color(ui.visuals().weak_text_color()),
+                    );
+                    for inline in content {
+                        render_inline(ui, inline, None, false, search_query, search_current, opts, zoom, body_font, occurrence, footnote_map, scroll_request);
+                    }
+                    ui.add_space(4.0);
+                    let back = ui.add(
+                        egui::Label::new(
+                            RichText::new("↩").size(12.0 * zoom).color(Color32::from_rgb(43, 121, 162))
+                        )
+                        .sense(egui::Sense::click()),
+                    );
+                    if back.hovered() {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                    }
+                    if back.clicked() {
+                        *scroll_request = Some(ref_block_idx);
+                    }
+                });
+            }
+        }
     }
 }
 
@@ -472,6 +507,8 @@ fn render_inline(
     zoom:           f32,
     body_font:      &egui::FontFamily,
     occurrence:     &mut usize,
+    footnote_map:   &HashMap<String, (usize, usize, usize)>,
+    scroll_request: &mut Option<usize>,
 ) {
     let base = size.unwrap_or(14.0) * zoom;
     match inline {
@@ -611,6 +648,24 @@ fn render_inline(
                         .color(Color32::GRAY)
                         .italics()
                 );
+            }
+        }
+        Inline::FootnoteRef(label) => {
+            if let Some(&(number, def_block_idx, _)) = footnote_map.get(label) {
+                let resp = ui.add(
+                    egui::Label::new(
+                        RichText::new(format!("[{}]", number))
+                            .size(base * 0.75)
+                            .color(Color32::from_rgb(43, 121, 162))
+                    )
+                    .sense(egui::Sense::click()),
+                );
+                if resp.hovered() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                }
+                if resp.clicked() {
+                    *scroll_request = Some(def_block_idx);
+                }
             }
         }
     }

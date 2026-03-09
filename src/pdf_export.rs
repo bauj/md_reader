@@ -166,6 +166,7 @@ impl Renderer {
             Block::List(ordered, items)      => self.render_list(*ordered, items, x_indent),
             Block::Table(headers, rows)      => self.render_table(headers, rows),
             Block::Rule                      => self.render_rule(),
+            Block::FootnoteDef(_, inlines)   => self.render_paragraph(inlines, x_indent, BODY_PT),
         }
     }
 
@@ -373,6 +374,7 @@ fn inlines_to_plain(inlines: &[Inline]) -> String {
         | Inline::BoldItalic(s) | Inline::Code(s) => s.as_str(),
         Inline::Link(t, _)  => t.as_str(),
         Inline::Image(_, a) => a.as_str(),
+        Inline::FootnoteRef(_) => "",
     }).collect()
 }
 
@@ -387,6 +389,7 @@ fn inlines_to_words(inlines: &[Inline], default_size: f32) -> Vec<Word> {
             Inline::Code(s)       => (s, false, true,  (0.12, 0.12, 0.12)),
             Inline::Link(t, _)    => (t, false, false, (0.17, 0.47, 0.64)),
             Inline::Image(_, a)   => (a, false, false, (0.50, 0.50, 0.50)),
+            Inline::FootnoteRef(_) => continue,
         };
         let size = if mono { CODE_PT } else { default_size };
         for raw in text.split_whitespace() {

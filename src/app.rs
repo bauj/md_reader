@@ -1267,7 +1267,7 @@ impl eframe::App for App {
                     ViewMode::Preview => {
                         self.cursor_pos = None;
                         let sync = mode_switched.then(|| self.tabs[idx].preview_scroll_y);
-                        let (toggled, offset, heading_positions, at_bottom) = {
+                        let (toggled, offset, heading_positions, at_bottom, footnote_scroll) = {
                             let tab  = &self.tabs[idx];
                             let sq   = self.search_query.as_str();
                             let sc   = self.search_current;
@@ -1277,6 +1277,9 @@ impl eframe::App for App {
                         self.tabs[idx].preview_scroll_y = offset;
                         self.tabs[idx].heading_positions = heading_positions;
                         self.tabs[idx].preview_at_bottom = at_bottom;
+                        if let Some(target) = footnote_scroll {
+                            self.scroll_to_block = Some(target);
+                        }
                         if let Some(task_idx) = toggled {
                             toggle_task_in_buffer(&mut self.tabs[idx].buffer, task_idx);
                             self.tabs[idx].needs_reparse = true;
@@ -1403,7 +1406,7 @@ impl eframe::App for App {
                         tab.editor_scroll_y = eoffset;
 
                         let mut right_ui = ui.new_child(egui::UiBuilder::new().max_rect(right_rect));
-                        let (preview_toggled, poffset, preview_heading_positions, preview_at_bottom) = render_preview(
+                        let (preview_toggled, poffset, preview_heading_positions, preview_at_bottom, footnote_scroll) = render_preview(
                             &mut right_ui,
                             &tab.parsed_doc,
                             &tab.buffer,
@@ -1421,6 +1424,9 @@ impl eframe::App for App {
                         tab.preview_scroll_y = poffset;
                         tab.heading_positions = preview_heading_positions;
                         tab.preview_at_bottom = preview_at_bottom;
+                        if let Some(target) = footnote_scroll {
+                            self.scroll_to_block = Some(target);
+                        }
                         if let Some(task_idx) = preview_toggled {
                             toggle_task_in_buffer(&mut tab.buffer, task_idx);
                             tab.needs_reparse = true;
@@ -1563,7 +1569,7 @@ fn render_preview(
     sync_scroll:    Option<f32>,
     zoom:           f32,
     body_font:      &egui::FontFamily,
-) -> (Option<usize>, f32, Vec<(usize, f32)>, bool) {
+) -> (Option<usize>, f32, Vec<(usize, f32)>, bool, Option<usize>) {
     // Measure from max_rect, which correctly reflects the column width in split mode.
     // clip_rect() would return the parent panel's full width because ui.columns() does
     // not narrow the clip rect — only max_rect is set to the column's allocated rect.
@@ -1605,7 +1611,7 @@ fn render_preview(
             // Hard-clip painting to content_rect so nothing renders outside the column.
             child_ui.shrink_clip_rect(content_rect);
 
-            let (toggled, positions) = if let Some(doc) = doc {
+            let (toggled, positions, footnote_scroll) = if let Some(doc) = doc {
                 crate::markdown::render_markdown(
                     &mut child_ui, doc, scroll_to, hl,
                     search_query, search_current, opts, zoom,
@@ -1615,7 +1621,7 @@ fn render_preview(
                 if !buffer.is_empty() {
                     child_ui.label("Failed to parse markdown.");
                 }
-                (None, Vec::new())
+                (None, Vec::new(), None)
             };
 
             // Advance the parent cursor using the child's actual height but clamping
@@ -1630,11 +1636,11 @@ fn render_preview(
 
             ui.add_space(32.0);
 
-            (toggled, positions)
+            (toggled, positions, footnote_scroll)
         });
     let is_at_bottom = out.content_size.y > 0.0
         && out.state.offset.y + out.inner_rect.height() >= out.content_size.y - 1.0;
-    (out.inner.0, out.state.offset.y, out.inner.1, is_at_bottom)
+    (out.inner.0, out.state.offset.y, out.inner.1, is_at_bottom, out.inner.2)
 }
 
 /// Apply Tab indent or Shift+Tab unindent to the editor buffer based on the current cursor/selection.
@@ -1957,6 +1963,7 @@ fn block_plain_text(block: &crate::markdown::Block) -> String {
             | Inline::BoldItalic(s) | Inline::Code(s) => s.as_str(),
             Inline::Link(t, _) => t.as_str(),
             Inline::Image(_, alt) => alt.as_str(),
+            Inline::FootnoteRef(_) => "",
         }).collect::<Vec<_>>().join("")
     }
 
@@ -1975,6 +1982,7 @@ fn block_plain_text(block: &crate::markdown::Block) -> String {
             s
         }
         Block::Rule => String::new(),
+        Block::FootnoteDef(_, ils) => inlines_text(ils),
     }
 }
 
@@ -2030,6 +2038,7 @@ fn heading_byte_offset(buffer: &str, blocks: &[crate::markdown::Block], block_id
             | Inline::BoldItalic(s) | Inline::Code(s) => s.as_str(),
             Inline::Link(t, _) => t.as_str(),
             Inline::Image(_, alt) => alt.as_str(),
+            Inline::FootnoteRef(_) => "",
         }).collect()
     }
 

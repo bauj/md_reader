@@ -1,8 +1,11 @@
+use std::collections::HashMap;
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd, CodeBlockKind};
 
 #[derive(Clone, Debug)]
 pub struct ParsedDoc {
     pub blocks: Vec<Block>,
+    // label -> (display_number, def_block_idx, ref_block_idx)
+    pub footnote_map: HashMap<String, (usize, usize, usize)>,
 }
 
 #[derive(Clone, Debug)]
@@ -15,6 +18,7 @@ pub enum Block {
     List(bool, Vec<ListItem>),       // ordered, items
     Table(Vec<Vec<Inline>>, Vec<Vec<Vec<Inline>>>), // headers, rows (each cell is a Vec<Inline>)
     Rule,
+    FootnoteDef(String, Vec<Inline>),  // label, content
 }
 
 #[derive(Clone, Debug)]
@@ -33,12 +37,14 @@ pub enum Inline {
     Code(String),
     Link(String, String), // text, url
     Image(String, String), // url, alt text
+    FootnoteRef(String),   // label
 }
 
 pub fn parse_markdown(text: &str) -> ParsedDoc {
     let mut opts = Options::empty();
     opts.insert(Options::ENABLE_TABLES);
     opts.insert(Options::ENABLE_TASKLISTS);
+    opts.insert(Options::ENABLE_FOOTNOTES);
 
     let parser = Parser::new_ext(text, opts);
 
@@ -53,7 +59,7 @@ pub fn parse_markdown(text: &str) -> ParsedDoc {
 
     // Block context
     #[derive(PartialEq)]
-    enum Ctx { None, Heading(u32), Paragraph, BlockQuote, ListItem, CodeBlock, TableCell }
+    enum Ctx { None, Heading(u32), Paragraph, BlockQuote, ListItem, CodeBlock, TableCell, FootnoteDef }
     let mut ctx = Ctx::None;
 
     // List state — stack to support nested lists
@@ -76,6 +82,12 @@ pub fn parse_markdown(text: &str) -> ParsedDoc {
     let mut table_cur_row: Vec<Vec<Inline>> = Vec::new();
     let mut table_in_head = false;
 
+    // Footnote state
+    let mut footnote_refs: Vec<String> = Vec::new();            // labels in order of first appearance
+    let mut footnote_ref_locs: HashMap<String, usize> = HashMap::new(); // label -> approx ref block idx
+    let mut footnote_defs: HashMap<String, Vec<Inline>> = HashMap::new(); // label -> content
+    let mut footnote_label = String::new();                    // current def label being parsed
+
     let push_text = |inlines: &mut Vec<Inline>, bold: bool, italic: bool, text: &str| {
         let s = text.to_string();
         inlines.push(match (bold, italic) {
@@ -94,11 +106,11 @@ pub fn parse_markdown(text: &str) -> ParsedDoc {
                 ctx = Ctx::Heading(level as u32);
             }
             Event::Start(Tag::Paragraph) => {
-                if list_stack.is_empty() && ctx != Ctx::BlockQuote {
+                if list_stack.is_empty() && ctx != Ctx::BlockQuote && ctx != Ctx::FootnoteDef {
                     current_inlines.clear();
                     ctx = Ctx::Paragraph;
                 }
-                // inside a list item or blockquote: let inlines keep accumulating
+                // inside a list item, blockquote, or footnote def: let inlines keep accumulating
             }
             Event::Start(Tag::BlockQuote(_)) => {
                 current_inlines.clear();
@@ -275,9 +287,46 @@ pub fn parse_markdown(text: &str) -> ParsedDoc {
                 }
             }
 
+            // ── Footnotes ─────────────────────────────────────────────────
+            Event::FootnoteReference(label) => {
+                let label = label.to_string();
+                if !footnote_ref_locs.contains_key(&label) {
+                    footnote_ref_locs.insert(label.clone(), blocks.len());
+                    footnote_refs.push(label.clone());
+                }
+                current_inlines.push(Inline::FootnoteRef(label));
+            }
+            Event::Start(Tag::FootnoteDefinition(label)) => {
+                footnote_label = label.to_string();
+                current_inlines.clear();
+                ctx = Ctx::FootnoteDef;
+            }
+            Event::End(TagEnd::FootnoteDefinition) => {
+                footnote_defs.insert(
+                    std::mem::take(&mut footnote_label),
+                    std::mem::take(&mut current_inlines),
+                );
+                ctx = Ctx::None;
+            }
+
             _ => {}
         }
     }
 
-    ParsedDoc { blocks }
+    // ── Post-loop: build footnote blocks and map ──────────────────────────
+    let mut footnote_map = HashMap::new();
+    if !footnote_refs.is_empty() {
+        blocks.push(Block::Rule);  // visual separator before footnotes
+        let base_idx = blocks.len();
+        for (i, label) in footnote_refs.iter().enumerate() {
+            let number        = i + 1;
+            let def_block_idx = base_idx + i;
+            let ref_block_idx = footnote_ref_locs.get(label).copied().unwrap_or(0);
+            footnote_map.insert(label.clone(), (number, def_block_idx, ref_block_idx));
+            let content = footnote_defs.remove(label).unwrap_or_default();
+            blocks.push(Block::FootnoteDef(label.clone(), content));
+        }
+    }
+
+    ParsedDoc { blocks, footnote_map }
 }

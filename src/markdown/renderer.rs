@@ -357,7 +357,7 @@ fn render_block(
 
             // Measure the widest no-wrap content in each column.
             let body_fid = egui::FontId::new(14.0 * zoom, body_font.clone());
-            let code_fid = egui::FontId::monospace(13.0 * zoom);
+            let code_fid = egui::FontId::monospace(14.0 * zoom * 0.92);
             let measure_cell = |inlines: &Vec<Inline>| -> f32 {
                 inlines.iter().map(|il| match il {
                     Inline::Code(c) => ui.fonts(|f|
@@ -530,7 +530,7 @@ fn render_inline(
             let occ_base    = *occurrence;
             let match_count = match_offs.len();
 
-            let font_id = FontId::monospace(13.0 * zoom);
+            let font_id = FontId::monospace(base * 0.92);
             let fg      = ui.visuals().text_color();
             let bg      = ui.visuals().faint_bg_color;
             let h_pad   = 3.0_f32;

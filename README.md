@@ -15,10 +15,13 @@ A fast, native desktop markdown reader and editor built with [egui](https://gith
 - **Document outline** — collapsible heading tree with auto-scroll tracking
 - **Full-text search** — Ctrl+F with case-sensitive and whole-word options
 - **Four themes** — Light (Manuscript), Coal, Navy, Ayu
+- **Font selection** — choose from five preview body fonts (Rubik, Nunito, Figtree, Manrope, Source Sans 3)
 - **Zoom** — Ctrl+Scroll to scale content independently of the UI
 - **File watching** — auto-reloads files edited externally
-- **Session persistence** — restores open tabs, view mode, theme, and zoom on restart
+- **Session persistence** — restores open tabs, view mode, theme, zoom, and font on restart
 - **Unsaved-changes guard** — prompts before closing a modified file
+- **Selectable code blocks** — copy code from preview without switching to edit mode
+- **PDF export** — export any document to a well-formatted A4 PDF with syntax-highlighted code blocks, tables, footnotes, and a fully nested, collapsible heading outline
 
 ---
 

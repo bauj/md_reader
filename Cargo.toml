@@ -27,3 +27,4 @@ dirs = "5"
 image = "0.24"
 printpdf = "0.7"
 ttf-parser = "0.25"
+lopdf = { version = "0.31", default-features = false }

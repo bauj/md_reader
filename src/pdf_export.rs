@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::io::{BufWriter, Cursor};
+use std::io::Cursor;
 use std::path::Path;
 use printpdf::*;
 use printpdf::path::{PaintMode, WindingOrder};
@@ -145,6 +145,10 @@ struct Renderer {
     highlighter:    Highlighter,
     /// Y cursor in mm from page bottom. Decreases as we write downward.
     y: f32,
+    /// 0-based page counter, incremented on each new_page call.
+    page_num: usize,
+    /// Headings as (level, page_num_0based, title) for the PDF outline.
+    bookmarks: Vec<(u32, usize, String)>,
 }
 
 impl Renderer {
@@ -165,6 +169,8 @@ impl Renderer {
             footnote_nums: HashMap::new(),
             highlighter: Highlighter::new(),
             y: PAGE_H - MARGIN_Y,
+            page_num: 0,
+            bookmarks: Vec::new(),
         })
     }
 
@@ -180,6 +186,7 @@ impl Renderer {
         let (page, layer1) = self.doc.add_page(Mm(PAGE_W), Mm(PAGE_H), "Layer 1");
         self.layer = self.doc.get_page(page).get_layer(layer1);
         self.y = PAGE_H - MARGIN_Y;
+        self.page_num += 1;
     }
 
     // ── Drawing primitives ────────────────────────────────────────────────────
@@ -304,6 +311,17 @@ impl Renderer {
     }
 
     fn render_heading(&mut self, level: u32, inlines: &[Inline]) {
+        // Record this heading for the PDF outline (first heading per page wins).
+        let plain: String = inlines.iter().map(|il| match il {
+            Inline::Text(t) | Inline::Bold(t) | Inline::Italic(t) | Inline::BoldItalic(t) => t.as_str(),
+            Inline::Code(c) => c.as_str(),
+            Inline::Link(text, _) => text.as_str(),
+            _ => "",
+        }).collect::<Vec<_>>().join("");
+        if !plain.trim().is_empty() {
+            self.bookmarks.push((level, self.page_num, plain));
+        }
+
         let size      = match level { 1 => H1_PT, 2 => H2_PT, 3 => H3_PT, 4 => H4_PT, _ => H5_PT };
         let gap_above = match level { 1 => 7.0_f32, 2 => 5.0, _ => 3.5 };
         let gap_below = match level { 1 => 2.5_f32, 2 => 2.0, _ => 1.5 };
@@ -729,6 +747,185 @@ fn word_wrap(words: &[Word], max_w: f32) -> Vec<Vec<Word>> {
     lines
 }
 
+// ── PDF outline injection via lopdf ──────────────────────────────────────────
+
+struct OutlineNode {
+    _level:   u32,
+    title:    String,
+    page_num: usize,
+    parent:   Option<usize>,
+    children: Vec<usize>,
+    prev:     Option<usize>,
+    next:     Option<usize>,
+}
+
+fn build_outline_tree(headings: &[(u32, usize, String)]) -> Vec<OutlineNode> {
+    let mut nodes: Vec<OutlineNode> = Vec::new();
+    // stack of (level, node_index)
+    let mut stack: Vec<(u32, usize)> = Vec::new();
+
+    for (level, page_num, title) in headings {
+        // Pop ancestors at same or deeper level.
+        while stack.last().map_or(false, |&(l, _)| l >= *level) {
+            stack.pop();
+        }
+        let parent = stack.last().map(|&(_, idx)| idx);
+
+        // Find prev sibling = last child of parent (or last root node).
+        let prev = match parent {
+            Some(p) => nodes[p].children.last().copied(),
+            None    => {
+                // last root node
+                let mut last_root = None;
+                for (i, n) in nodes.iter().enumerate() {
+                    if n.parent.is_none() { last_root = Some(i); }
+                }
+                last_root
+            }
+        };
+
+        let idx = nodes.len();
+        nodes.push(OutlineNode {
+            _level: *level,
+            title: title.clone(),
+            page_num: *page_num,
+            parent,
+            children: Vec::new(),
+            prev,
+            next: None,
+        });
+
+        // Wire prev.next → this node.
+        if let Some(p) = prev {
+            nodes[p].next = Some(idx);
+        }
+        // Register as child of parent.
+        if let Some(p) = parent {
+            nodes[p].children.push(idx);
+        }
+
+        stack.push((*level, idx));
+    }
+    nodes
+}
+
+fn count_descendants(idx: usize, nodes: &[OutlineNode]) -> i64 {
+    nodes[idx].children.iter()
+        .map(|&ci| 1 + count_descendants(ci, nodes))
+        .sum()
+}
+
+fn pdf_utf16(s: &str) -> lopdf::Object {
+    let mut bytes = vec![0xFE, 0xFF]; // BOM
+    for unit in s.encode_utf16() {
+        bytes.push((unit >> 8) as u8);
+        bytes.push(unit as u8);
+    }
+    lopdf::Object::String(bytes, lopdf::StringFormat::Hexadecimal)
+}
+
+fn inject_outlines(
+    bytes: Vec<u8>,
+    headings: &[(u32, usize, String)],
+) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    use lopdf::{Dictionary, Object, ObjectId};
+
+    if headings.is_empty() {
+        return Ok(bytes);
+    }
+
+    let mut doc = lopdf::Document::load_from(std::io::Cursor::new(&bytes))?;
+
+    // pages() returns BTreeMap<page_number_1based, ObjectId>
+    let pages: std::collections::BTreeMap<u32, ObjectId> = doc.get_pages();
+
+    let nodes = build_outline_tree(headings);
+    if nodes.is_empty() {
+        return Ok(bytes);
+    }
+
+    // Allocate object IDs: root + one per node.
+    let root_id: ObjectId = doc.new_object_id();
+    let node_ids: Vec<ObjectId> = (0..nodes.len()).map(|_| doc.new_object_id()).collect();
+
+    // Helper: resolve 0-based page_num to a lopdf page ObjectId.
+    let page_ref = |page_num: usize| -> Option<ObjectId> {
+        let page_1based = (page_num + 1) as u32;
+        pages.get(&page_1based).copied()
+    };
+
+    // Build each outline item dictionary.
+    for (i, node) in nodes.iter().enumerate() {
+        let parent_ref = match node.parent {
+            Some(p) => Object::Reference(node_ids[p]),
+            None    => Object::Reference(root_id),
+        };
+
+        let mut dict = Dictionary::new();
+        dict.set("Title",  pdf_utf16(&node.title));
+        dict.set("Parent", parent_ref);
+
+        if let Some(page_oid) = page_ref(node.page_num) {
+            dict.set("Dest", Object::Array(vec![
+                Object::Reference(page_oid),
+                Object::Name(b"XYZ".to_vec()),
+                Object::Null,
+                Object::Null,
+                Object::Null,
+            ]));
+        }
+
+        let desc = count_descendants(i, &nodes);
+        dict.set("Count", Object::Integer(desc));
+
+        if let Some(prev) = node.prev {
+            dict.set("Prev", Object::Reference(node_ids[prev]));
+        }
+        if let Some(next) = node.next {
+            dict.set("Next", Object::Reference(node_ids[next]));
+        }
+        if let Some(&first) = node.children.first() {
+            dict.set("First", Object::Reference(node_ids[first]));
+        }
+        if let Some(&last) = node.children.last() {
+            dict.set("Last", Object::Reference(node_ids[last]));
+        }
+
+        doc.objects.insert(node_ids[i], Object::Dictionary(dict));
+    }
+
+    // Collect root-level nodes.
+    let root_nodes: Vec<usize> = nodes.iter().enumerate()
+        .filter(|(_, n)| n.parent.is_none())
+        .map(|(i, _)| i)
+        .collect();
+
+    let total_count = nodes.len() as i64;
+    let first_root = root_nodes.first().map(|&i| node_ids[i]);
+    let last_root  = root_nodes.last().map(|&i| node_ids[i]);
+
+    // Build root /Outlines dictionary.
+    let mut root_dict = Dictionary::new();
+    root_dict.set("Type", Object::Name(b"Outlines".to_vec()));
+    root_dict.set("Count", Object::Integer(total_count));
+    if let Some(fr) = first_root {
+        root_dict.set("First", Object::Reference(fr));
+    }
+    if let Some(lr) = last_root {
+        root_dict.set("Last", Object::Reference(lr));
+    }
+    doc.objects.insert(root_id, Object::Dictionary(root_dict));
+
+    // Wire catalog.
+    let catalog = doc.catalog_mut()?;
+    catalog.set("Outlines", Object::Reference(root_id));
+    catalog.set("PageMode", Object::Name(b"UseOutlines".to_vec()));
+
+    let mut out = Vec::new();
+    doc.save_to(&mut out)?;
+    Ok(out)
+}
+
 // ── Public entry point ────────────────────────────────────────────────────────
 
 pub fn export_pdf(doc: &ParsedDoc, dest: &Path) -> Result<(), Box<dyn std::error::Error>> {
@@ -747,7 +944,9 @@ pub fn export_pdf(doc: &ParsedDoc, dest: &Path) -> Result<(), Box<dyn std::error
         r.render_block(block, 0.0);
     }
 
-    let file = std::fs::File::create(dest)?;
-    r.doc.save(&mut BufWriter::new(file))?;
+    let headings = r.bookmarks.clone();
+    let bytes = r.doc.save_to_bytes()?;
+    let bytes = inject_outlines(bytes, &headings)?;
+    std::fs::write(dest, bytes)?;
     Ok(())
 }

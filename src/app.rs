@@ -183,6 +183,11 @@ pub struct App {
 
     // Fraction of sidebar height given to the file-tree panel (resizable divider).
     file_panel_ratio: f32,
+
+    // Track last-applied theme and title to avoid redundant egui calls that
+    // trigger repaints every frame.
+    last_applied_theme: Option<ThemeId>,
+    last_window_title:  String,
 }
 
 impl Default for App {
@@ -224,6 +229,8 @@ impl App {
             content_zoom:         1.0,
             sidebar_open:         true,
             file_panel_ratio:     0.25,
+            last_applied_theme:   None,
+            last_window_title:    String::new(),
         };
 
         if let Some(path) = initial_path {
@@ -518,10 +525,22 @@ impl App {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        ctx.send_viewport_cmd(egui::ViewportCommand::Title(self.window_title()));
+        // Only update title when it actually changes (sending ViewportCommand every frame
+        // causes unnecessary work in the windowing system).
+        let title = self.window_title();
+        if title != self.last_window_title {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
+            self.last_window_title = title;
+        }
 
         // ── Apply theme ────────────────────────────────────────────────────
-        apply_theme(ctx, self.active_theme);
+        // Guard: ctx.set_style() / ctx.set_visuals() call request_repaint() internally,
+        // so calling apply_theme() unconditionally every frame creates a continuous
+        // repaint loop even when the app is idle. Only apply when the theme changes.
+        if self.last_applied_theme != Some(self.active_theme) {
+            apply_theme(ctx, self.active_theme);
+            self.last_applied_theme = Some(self.active_theme);
+        }
         let theme = crate::theme::theme_by_id(self.active_theme);
 
         // ── Ctrl+Scroll zoom ──────────────────────────────────────────────

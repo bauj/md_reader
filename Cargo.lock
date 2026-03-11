@@ -2125,6 +2125,7 @@ dependencies = [
  "serde",
  "serde_json",
  "syntect",
+ "ttf-parser 0.25.1",
 ]
 
 [[package]]

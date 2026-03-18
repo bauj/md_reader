@@ -1,9 +1,9 @@
 [package]
 name = "md_reader"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2024"
 authors = ["Juba H."]
-description = "A fast, native markdown reader and editor with live preview, syntax highlighting, and multi-file support."
+description = "A fast, native markdown reader and editor with live preview, syntax highlighting, multi-file support and pdf export."
 license = "MIT"
 repository = "https://github.com/bauj/md_reader"
 homepage = "https://github.com/bauj/md_reader"

@@ -328,7 +328,7 @@ impl Renderer {
         let lh        = line_h_mm(size);
 
         // Force bold on all heading words and re-measure widths with the bold face.
-        let words: Vec<Word> = inlines_to_words(inlines, size, &self.fonts, &self.footnote_nums)
+        let words: Vec<Word> = inlines_to_words(inlines, size, &self.fonts, &self.footnote_nums, false)
             .into_iter()
             .map(|mut w| {
                 if !w.bold {
@@ -366,7 +366,7 @@ impl Renderer {
     }
 
     fn render_paragraph(&mut self, inlines: &[Inline], x_indent: f32, size: f32) {
-        let words = inlines_to_words(inlines, size, &self.fonts, &self.footnote_nums);
+        let words = inlines_to_words(inlines, size, &self.fonts, &self.footnote_nums, false);
         self.render_word_list(&words, x_indent, size);
     }
 
@@ -411,7 +411,7 @@ impl Renderer {
             size:     BODY_PT,
             spacing,
         }];
-        words.extend(inlines_to_words(inlines, BODY_PT, &self.fonts, &self.footnote_nums));
+        words.extend(inlines_to_words(inlines, BODY_PT, &self.fonts, &self.footnote_nums, false));
         self.render_word_list(&words, 0.0, BODY_PT);
     }
 
@@ -517,7 +517,7 @@ impl Renderer {
     }
 
     fn render_blockquote(&mut self, inlines: &[Inline]) {
-        let words = inlines_to_words(inlines, BODY_PT, &self.fonts, &self.footnote_nums);
+        let words = inlines_to_words(inlines, BODY_PT, &self.fonts, &self.footnote_nums, false);
         let lh    = line_h_mm(BODY_PT);
         let indent = 8.0_f32;
         let lines = word_wrap(&words, CONTENT_W - indent);
@@ -550,7 +550,7 @@ impl Renderer {
 
         for (i, item) in items.iter().enumerate() {
             let bullet = if ordered { format!("{}.", i + 1) } else { "•".to_string() };
-            let words  = inlines_to_words(&item.inlines, BODY_PT, &self.fonts, &self.footnote_nums);
+            let words  = inlines_to_words(&item.inlines, BODY_PT, &self.fonts, &self.footnote_nums, false);
             let lines  = word_wrap(&words, CONTENT_W - item_indent);
 
             self.ensure(lh);
@@ -593,15 +593,51 @@ impl Renderer {
         if headers.is_empty() { return; }
 
         let n_cols = headers.len();
-        let col_w  = CONTENT_W / n_cols as f32;
         let lh     = line_h_mm(BODY_PT);
         let h_pad  = 3.0_f32; // horizontal cell padding
         let v_pad  = 2.0_f32; // vertical cell padding (top + bottom)
-        let cell_w = col_w - h_pad * 2.0;
 
-        // Wrap inlines for a cell and return lines of words.
-        let wrap_cell = |inlines: &Vec<Inline>, fonts: &FontFaces, nums: &HashMap<String, usize>| {
-            word_wrap(&inlines_to_words(inlines, BODY_PT, fonts, nums), cell_w)
+        // ── Compute proportional column widths ────────────────────────────────
+        // Natural width = single-line text width of the widest cell in each column.
+        // Headers are rendered bold, so measure them as bold for accurate sizing.
+        let natural_w = |inlines: &Vec<Inline>, bold: bool| -> f32 {
+            let words = inlines_to_words(inlines, BODY_PT, &self.fonts, &self.footnote_nums, bold);
+            words.iter().enumerate().map(|(i, w)| {
+                if i == 0 { w.width() } else { w.spacing + w.width() }
+            }).sum()
+        };
+
+        let mut col_natural = vec![0.0_f32; n_cols];
+        for (c, h) in headers.iter().enumerate() {
+            col_natural[c] = col_natural[c].max(natural_w(h, true));
+        }
+        for row in rows {
+            for (c, cell) in row.iter().take(n_cols).enumerate() {
+                col_natural[c] = col_natural[c].max(natural_w(cell, false));
+            }
+        }
+
+        // Scale proportionally so the columns sum to exactly CONTENT_W,
+        // with a per-column minimum to avoid degenerate tiny columns.
+        let min_col_w   = (CONTENT_W / n_cols as f32 * 0.4).max(12.0);
+        let total_nat: f32 = col_natural.iter().sum::<f32>().max(1.0);
+        let mut col_widths: Vec<f32> = col_natural.iter()
+            .map(|&nw| (nw / total_nat * CONTENT_W).max(min_col_w))
+            .collect();
+        let total_w: f32 = col_widths.iter().sum();
+        for w in &mut col_widths { *w *= CONTENT_W / total_w; }
+
+        // Pre-compute left-edge x for each column.
+        let col_x: Vec<f32> = (0..n_cols).map(|c| {
+            MARGIN_X + col_widths[..c].iter().sum::<f32>()
+        }).collect();
+
+        let cell_widths: Vec<f32> = col_widths.iter().map(|&cw| cw - h_pad * 2.0).collect();
+
+        // Wrap inlines for a cell using that column's available text width.
+        let wrap_cell = |inlines: &Vec<Inline>, col: usize, bold: bool,
+                         fonts: &FontFaces, nums: &HashMap<String, usize>| {
+            word_wrap(&inlines_to_words(inlines, BODY_PT, fonts, nums, bold), cell_widths[col])
         };
 
         // Row height = tallest cell (by line count) × lh + top+bottom padding.
@@ -613,8 +649,8 @@ impl Renderer {
         self.y -= 2.0;
 
         // ── Header row ────────────────────────────────────────────────────────
-        let header_wrapped: Vec<Vec<Vec<Word>>> = headers.iter()
-            .map(|c| wrap_cell(c, &self.fonts, &self.footnote_nums))
+        let header_wrapped: Vec<Vec<Vec<Word>>> = headers.iter().enumerate()
+            .map(|(c, h)| wrap_cell(h, c, true, &self.fonts, &self.footnote_nums))
             .collect();
         let h_row_h = row_height(&header_wrapped);
         self.ensure(h_row_h);
@@ -622,13 +658,12 @@ impl Renderer {
         self.filled_rect(MARGIN_X, row_top - h_row_h, CONTENT_W, h_row_h, 0.88, 0.88, 0.92);
         self.y -= h_row_h;
         for (c, lines) in header_wrapped.iter().enumerate() {
-            let x = MARGIN_X + c as f32 * col_w + h_pad;
+            let x  = col_x[c] + h_pad;
             let mut cy = row_top - v_pad - lh;
             for line in lines {
                 let mut lx = x;
                 for (wi, word) in line.iter().enumerate() {
                     self.set_fill(0.08, 0.08, 0.08);
-                    // Force bold for all header text
                     self.put_text_fb(&word.text, word.size, lx, cy, true, word.italic, word.mono);
                     lx += word.width();
                     if wi + 1 < line.len() { lx += word.spacing; }
@@ -640,16 +675,15 @@ impl Renderer {
 
         // ── Data rows ─────────────────────────────────────────────────────────
         for row in rows {
-            let row_wrapped: Vec<Vec<Vec<Word>>> = row.iter()
-                .take(n_cols)
-                .map(|c| wrap_cell(c, &self.fonts, &self.footnote_nums))
+            let row_wrapped: Vec<Vec<Vec<Word>>> = row.iter().take(n_cols).enumerate()
+                .map(|(c, cell)| wrap_cell(cell, c, false, &self.fonts, &self.footnote_nums))
                 .collect();
             let r_h = row_height(&row_wrapped);
             self.ensure(r_h);
             let row_top = self.y;
             self.y -= r_h;
             for (c, lines) in row_wrapped.iter().enumerate() {
-                let x = MARGIN_X + c as f32 * col_w + h_pad;
+                let x  = col_x[c] + h_pad;
                 let mut cy = row_top - v_pad - lh;
                 for line in lines {
                     let mut lx = x;
@@ -685,6 +719,7 @@ fn inlines_to_words(
     default_size:  f32,
     fonts:         &FontFaces,
     footnote_nums: &HashMap<String, usize>,
+    force_bold:    bool,
 ) -> Vec<Word> {
     let mut out = Vec::new();
     // Use the actual advance width of a space in the body font for inter-word spacing.
@@ -719,7 +754,8 @@ fn inlines_to_words(
             Inline::Image(_, a)   => (a, false, false, false, (0.50, 0.50, 0.50)),
             Inline::FootnoteRef(_) => unreachable!(),
         };
-        let size = if mono { default_size * 0.92 } else { default_size };
+        let bold     = bold || force_bold;
+        let size     = if mono { default_size * 0.92 } else { default_size };
         for raw in text.split_whitespace() {
             let width_mm = fonts.measure(raw, size, bold, italic, mono);
             out.push(Word { text: raw.to_string(), bold, italic, mono, color, size, width_mm, spacing });
@@ -728,20 +764,43 @@ fn inlines_to_words(
     out
 }
 
+/// Break a single Word into smaller pieces when it exceeds `max_w`.
+/// Uses an average character-width estimate (exact for mono, approximate for proportional).
+fn break_word(word: &Word, max_w: f32) -> Vec<Word> {
+    if word.width_mm <= max_w || word.text.is_empty() {
+        return vec![word.clone()];
+    }
+    let chars: Vec<char> = word.text.chars().collect();
+    let char_w = word.width_mm / chars.len() as f32;
+    let chunk  = ((max_w / char_w).floor() as usize).max(1);
+    let mut result = Vec::new();
+    let mut start  = 0;
+    while start < chars.len() {
+        let end  = (start + chunk).min(chars.len());
+        let text: String = chars[start..end].iter().collect();
+        let width_mm = (end - start) as f32 * char_w;
+        result.push(Word { text, width_mm, ..*word });
+        start = end;
+    }
+    result
+}
+
 fn word_wrap(words: &[Word], max_w: f32) -> Vec<Vec<Word>> {
     let mut lines: Vec<Vec<Word>> = Vec::new();
     let mut cur:   Vec<Word>      = Vec::new();
     let mut cur_w = 0.0_f32;
 
     for word in words {
-        let w     = word.width();
-        let space = if cur.is_empty() { 0.0 } else { word.spacing };
-        if !cur.is_empty() && cur_w + space + w > max_w {
-            lines.push(std::mem::take(&mut cur));
-            cur_w = 0.0;
+        for sub in break_word(word, max_w) {
+            let w     = sub.width();
+            let space = if cur.is_empty() { 0.0 } else { sub.spacing };
+            if !cur.is_empty() && cur_w + space + w > max_w {
+                lines.push(std::mem::take(&mut cur));
+                cur_w = 0.0;
+            }
+            cur_w += if cur.is_empty() { w } else { space + w };
+            cur.push(sub);
         }
-        cur_w += space + w;
-        cur.push(word.clone());
     }
     if !cur.is_empty() { lines.push(cur); }
     lines

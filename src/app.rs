@@ -839,7 +839,7 @@ impl eframe::App for App {
 
                 ui.separator();
 
-                if ui.button("Open File(s)  Ctrl+O").on_hover_text("Open one or more markdown files").clicked() {
+                if ui.button("Open File(s)").on_hover_text("Open one or more markdown files  (Ctrl+O)").clicked() {
                     for path in rfd::FileDialog::new()
                         .add_filter("Markdown / Text", &["md", "txt", "markdown"])
                         .pick_files()
@@ -849,7 +849,7 @@ impl eframe::App for App {
                     }
                 }
 
-                if ui.button("Open Folder  Ctrl+Shift+O").on_hover_text("Open a folder in the sidebar").clicked()
+                if ui.button("Open Folder").on_hover_text("Open a folder in the sidebar  (Ctrl+Shift+O)").clicked()
                     && let Some(path) = rfd::FileDialog::new().pick_folder() {
                         self.add_root(path);
                     }

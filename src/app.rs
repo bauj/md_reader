@@ -563,7 +563,8 @@ impl eframe::App for App {
 
         // ── Keyboard shortcuts ────────────────────────────────────────────
         let ctrl_s     = ctx.input(|i| i.key_pressed(Key::S)        && i.modifiers.ctrl);
-        let ctrl_o     = ctx.input(|i| i.key_pressed(Key::O)        && i.modifiers.ctrl);
+        let ctrl_o       = ctx.input(|i| i.key_pressed(Key::O) && i.modifiers.ctrl && !i.modifiers.shift);
+        let ctrl_shift_o = ctx.input(|i| i.key_pressed(Key::O) && i.modifiers.ctrl &&  i.modifiers.shift);
         let ctrl_w     = ctx.input(|i| i.key_pressed(Key::W)        && i.modifiers.ctrl);
         let ctrl_n     = ctx.input(|i| i.key_pressed(Key::N)        && i.modifiers.ctrl);
         let ctrl_q     = ctx.input(|i| i.key_pressed(Key::Q)        && i.modifiers.ctrl);
@@ -592,7 +593,16 @@ impl eframe::App for App {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
         if ctrl_n { self.create_new_file(); }
-        if ctrl_o
+        if ctrl_o {
+            for path in rfd::FileDialog::new()
+                .add_filter("Markdown / Text", &["md", "txt", "markdown"])
+                .pick_files()
+                .unwrap_or_default()
+            {
+                self.open_tab(path);
+            }
+        }
+        if ctrl_shift_o
             && let Some(path) = rfd::FileDialog::new().pick_folder() {
                 self.add_root(path);
             }
@@ -829,7 +839,17 @@ impl eframe::App for App {
 
                 ui.separator();
 
-                if ui.button("Open Folder").on_hover_text("Open a folder in the sidebar").clicked()
+                if ui.button("Open File(s)  Ctrl+O").on_hover_text("Open one or more markdown files").clicked() {
+                    for path in rfd::FileDialog::new()
+                        .add_filter("Markdown / Text", &["md", "txt", "markdown"])
+                        .pick_files()
+                        .unwrap_or_default()
+                    {
+                        self.open_tab(path);
+                    }
+                }
+
+                if ui.button("Open Folder  Ctrl+Shift+O").on_hover_text("Open a folder in the sidebar").clicked()
                     && let Some(path) = rfd::FileDialog::new().pick_folder() {
                         self.add_root(path);
                     }
@@ -1111,7 +1131,7 @@ impl eframe::App for App {
                             );
                             ui.add_space(4.0);
                             ui.label(
-                                egui::RichText::new("Open Folder or Ctrl+O")
+                                egui::RichText::new("Open File (Ctrl+O) or Folder (Ctrl+Shift+O)")
                                     .color(ui.visuals().weak_text_color())
                                     .size(11.0),
                             );

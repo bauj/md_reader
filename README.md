@@ -66,7 +66,8 @@ md_reader path/to/file.md
 
 | Shortcut | Action |
 |---|---|
-| `Ctrl+O` | Open folder |
+| `Ctrl+O` | Open file(s) |
+| `Ctrl+Shift+O` | Open folder |
 | `Ctrl+N` | New file |
 | `Ctrl+S` | Save current file |
 | `Ctrl+W` | Close current tab |

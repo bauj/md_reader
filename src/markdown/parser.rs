@@ -253,7 +253,11 @@ pub fn parse_markdown(text: &str) -> ParsedDoc {
                 }
             }
             Event::Code(c) => {
-                current_inlines.push(Inline::Code(c.to_string()));
+                if link_url.is_some() {
+                    link_text.push_str(&c);
+                } else {
+                    current_inlines.push(Inline::Code(c.to_string()));
+                }
             }
             Event::SoftBreak => {
                 if ctx == Ctx::CodeBlock {

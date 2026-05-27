@@ -587,49 +587,47 @@ fn render_inline(
             *occurrence += match_count;
         }
         Inline::Link(text, url) => {
-            // Check if URL is external (starts with http:// or https://)
             let is_external = url.starts_with("http://") || url.starts_with("https://");
-            
-            ui.horizontal(|ui| {
-                let resp = ui.label(
+            let hover_text = format!("Ctrl+Click to open: {}", url);
+
+            let resp = ui.add(
+                egui::Label::new(
                     RichText::new(text.as_str())
                         .color(Color32::from_rgb(43, 121, 162))
-                ).on_hover_text(if is_external {
-                    format!("Ctrl+Click to open external link: {}", url)
-                } else {
-                    format!("Ctrl+Click to open: {}", url)
-                });
+                ).sense(egui::Sense::click())
+            ).on_hover_text(&hover_text);
 
-                // Add external link indicator for external URLs
-                if is_external {
-                    ui.add_space(4.0);
-                    ui.label(
+            let ext_clicked = if is_external {
+                ui.add_space(4.0);
+                let ext_resp = ui.add(
+                    egui::Label::new(
                         RichText::new("[external]")
                             .color(Color32::from_rgb(43, 121, 162))
                             .size(10.0 * zoom)
                             .italics()
-                    );
+                    ).sense(egui::Sense::click())
+                ).on_hover_text(&hover_text);
+                let hovered = ui.ctx().input(|i| {
+                    i.pointer.hover_pos().map_or(false, |p| ext_resp.rect.contains(p))
+                });
+                if hovered {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                 }
+                ext_resp.clicked()
+            } else {
+                false
+            };
 
-                if resp.hovered() {
-                    // Underline on hover
-                    ui.painter().line_segment(
-                        [resp.rect.left_bottom(), resp.rect.right_bottom()],
-                        egui::Stroke::new(1.0, Color32::from_rgb(43, 121, 162))
-                    );
-                    
-                    let ctrl_held = ui.ctx().input(|i| i.modifiers.ctrl);
-                    if ctrl_held {
-                        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-                    }
-                }
-                if resp.clicked() {
-                    let ctrl_held = ui.ctx().input(|i| i.modifiers.ctrl);
-                    if ctrl_held {
-                        let _ = open::that(url.as_str());
-                    }
-                }
-            });
+            if resp.hovered() {
+                ui.painter().line_segment(
+                    [resp.rect.left_bottom(), resp.rect.right_bottom()],
+                    egui::Stroke::new(1.0, Color32::from_rgb(43, 121, 162))
+                );
+                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            }
+            if (resp.clicked() || ext_clicked) && ui.ctx().input(|i| i.modifiers.ctrl) {
+                let _ = open::that(url.as_str());
+            }
         }
         Inline::Image(url, alt) => {
             // Try to load image from file path or URL

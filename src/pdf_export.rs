@@ -125,6 +125,8 @@ struct Word {
     width_mm: f32,
     /// Width of the inter-word space that follows this word (in mm).
     spacing:  f32,
+    /// Hyperlink URL, if this word is part of a link.
+    url:      Option<String>,
 }
 
 impl Word {
@@ -149,6 +151,8 @@ struct Renderer {
     page_num: usize,
     /// Headings as (level, page_num_0based, title) for the PDF outline.
     bookmarks: Vec<(u32, usize, String)>,
+    /// (page_0based, x_mm, y_bottom_mm, w_mm, h_mm, url)
+    link_annotations: Vec<(usize, f32, f32, f32, f32, String)>,
 }
 
 impl Renderer {
@@ -171,6 +175,7 @@ impl Renderer {
             y: PAGE_H - MARGIN_Y,
             page_num: 0,
             bookmarks: Vec::new(),
+            link_annotations: Vec::new(),
         })
     }
 
@@ -388,6 +393,9 @@ impl Renderer {
             for (wi, word) in line_words.iter().enumerate() {
                 self.set_fill(word.color.0, word.color.1, word.color.2);
                 self.put_text_fb(&word.text, word.size, x, self.y, word.bold, word.italic, word.mono);
+                if let Some(ref url) = word.url {
+                    self.link_annotations.push((self.page_num, x, self.y - lh * 0.28, word.width_mm, lh, url.clone()));
+                }
                 x += word.width();
                 if wi + 1 < line_words.len() {
                     x += word.spacing;
@@ -410,6 +418,7 @@ impl Renderer {
             color:    (0.10, 0.10, 0.10),
             size:     BODY_PT,
             spacing,
+            url:      None,
         }];
         words.extend(inlines_to_words(inlines, BODY_PT, &self.fonts, &self.footnote_nums, false));
         self.render_word_list(&words, 0.0, BODY_PT);
@@ -563,6 +572,9 @@ impl Renderer {
                 for (wi, word) in first.iter().enumerate() {
                     self.set_fill(word.color.0, word.color.1, word.color.2);
                     self.put_text_fb(&word.text, word.size, x, self.y, word.bold, word.italic, word.mono);
+                    if let Some(ref url) = word.url {
+                        self.link_annotations.push((self.page_num, x, self.y - lh * 0.28, word.width_mm, lh, url.clone()));
+                    }
                     x += word.width();
                     if wi + 1 < first.len() { x += word.spacing; }
                 }
@@ -575,6 +587,9 @@ impl Renderer {
                 for (wi, word) in line_words.iter().enumerate() {
                     self.set_fill(word.color.0, word.color.1, word.color.2);
                     self.put_text_fb(&word.text, word.size, x, self.y, word.bold, word.italic, word.mono);
+                    if let Some(ref url) = word.url {
+                        self.link_annotations.push((self.page_num, x, self.y - lh * 0.28, word.width_mm, lh, url.clone()));
+                    }
                     x += word.width();
                     if wi + 1 < line_words.len() { x += word.spacing; }
                 }
@@ -690,6 +705,9 @@ impl Renderer {
                     for (wi, word) in line.iter().enumerate() {
                         self.set_fill(word.color.0, word.color.1, word.color.2);
                         self.put_text_fb(&word.text, word.size, lx, cy, word.bold, word.italic, word.mono);
+                        if let Some(ref url) = word.url {
+                            self.link_annotations.push((self.page_num, lx, cy - lh * 0.28, word.width_mm, lh, url.clone()));
+                        }
                         lx += word.width();
                         if wi + 1 < line.len() { lx += word.spacing; }
                     }
@@ -740,10 +758,12 @@ fn inlines_to_words(
                 color:  (0.17, 0.47, 0.64),
                 size,
                 spacing,
+                url: None,
             });
             continue;
         }
 
+        let url: Option<String> = if let Inline::Link(_, u) = inline { Some(u.clone()) } else { None };
         let (text, bold, italic, mono, color): (&str, bool, bool, bool, (f32, f32, f32)) = match inline {
             Inline::Text(s)       => (s, false, false, false, (0.10, 0.10, 0.10)),
             Inline::Bold(s)       => (s, true,  false, false, (0.05, 0.05, 0.05)),
@@ -758,7 +778,7 @@ fn inlines_to_words(
         let size     = if mono { default_size * 0.92 } else { default_size };
         for raw in text.split_whitespace() {
             let width_mm = fonts.measure(raw, size, bold, italic, mono);
-            out.push(Word { text: raw.to_string(), bold, italic, mono, color, size, width_mm, spacing });
+            out.push(Word { text: raw.to_string(), bold, italic, mono, color, size, width_mm, spacing, url: url.clone() });
         }
     }
     out
@@ -779,7 +799,7 @@ fn break_word(word: &Word, max_w: f32) -> Vec<Word> {
         let end  = (start + chunk).min(chars.len());
         let text: String = chars[start..end].iter().collect();
         let width_mm = (end - start) as f32 * char_w;
-        result.push(Word { text, width_mm, ..*word });
+        result.push(Word { text, width_mm, url: word.url.clone(), ..*word });
         start = end;
     }
     result
@@ -985,6 +1005,101 @@ fn inject_outlines(
     Ok(out)
 }
 
+// ── Link annotation injection ─────────────────────────────────────────────────
+
+fn heading_slug(text: &str) -> String {
+    let mut s = String::new();
+    for c in text.chars() {
+        if c.is_alphanumeric() || c == '-' {
+            for lc in c.to_lowercase() { s.push(lc); }
+        } else if c == ' ' {
+            s.push('-');
+        }
+    }
+    s
+}
+
+fn inject_links(
+    bytes: Vec<u8>,
+    annotations: &[(usize, f32, f32, f32, f32, String)],
+    slug_to_page: &HashMap<String, usize>,
+) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    use lopdf::{Dictionary, Object, ObjectId};
+
+    if annotations.is_empty() {
+        return Ok(bytes);
+    }
+
+    let mut doc = lopdf::Document::load_from(std::io::Cursor::new(&bytes))?;
+    let pages: std::collections::BTreeMap<u32, ObjectId> = doc.get_pages();
+
+    let mm_to_pt = |mm: f32| -> f32 { mm * 2.835 };
+
+    let mut page_annots: HashMap<usize, Vec<ObjectId>> = HashMap::new();
+
+    for &(page_num, x, y_bot, w, h, ref url) in annotations {
+        let mut annot = Dictionary::new();
+        annot.set("Type",    Object::Name(b"Annot".to_vec()));
+        annot.set("Subtype", Object::Name(b"Link".to_vec()));
+        annot.set("Rect", Object::Array(vec![
+            Object::Real(mm_to_pt(x)),
+            Object::Real(mm_to_pt(y_bot)),
+            Object::Real(mm_to_pt(x + w)),
+            Object::Real(mm_to_pt(y_bot + h)),
+        ]));
+        annot.set("Border", Object::Array(vec![
+            Object::Integer(0), Object::Integer(0), Object::Integer(0),
+        ]));
+
+        let action_id = if url.starts_with('#') {
+            let slug = heading_slug(&url[1..]);
+            if let Some(&target_page) = slug_to_page.get(&slug) {
+                let page_1based = (target_page + 1) as u32;
+                if let Some(&page_oid) = pages.get(&page_1based) {
+                    let mut action = Dictionary::new();
+                    action.set("S", Object::Name(b"GoTo".to_vec()));
+                    action.set("D", Object::Array(vec![
+                        Object::Reference(page_oid),
+                        Object::Name(b"XYZ".to_vec()),
+                        Object::Null, Object::Null, Object::Null,
+                    ]));
+                    let id = doc.new_object_id();
+                    doc.objects.insert(id, Object::Dictionary(action));
+                    Some(id)
+                } else { None }
+            } else { None }
+        } else {
+            let mut action = Dictionary::new();
+            action.set("S",   Object::Name(b"URI".to_vec()));
+            action.set("URI", Object::String(url.as_bytes().to_vec(), lopdf::StringFormat::Literal));
+            let id = doc.new_object_id();
+            doc.objects.insert(id, Object::Dictionary(action));
+            Some(id)
+        };
+
+        if let Some(aid) = action_id {
+            annot.set("A", Object::Reference(aid));
+            let annot_id = doc.new_object_id();
+            doc.objects.insert(annot_id, Object::Dictionary(annot));
+            page_annots.entry(page_num).or_default().push(annot_id);
+        }
+    }
+
+    for (page_num_0based, annot_ids) in page_annots {
+        let page_1based = (page_num_0based + 1) as u32;
+        if let Some(&page_oid) = pages.get(&page_1based) {
+            if let Some(Object::Dictionary(dict)) = doc.objects.get_mut(&page_oid) {
+                let refs: Vec<Object> = annot_ids.into_iter().map(Object::Reference).collect();
+                dict.set("Annots", Object::Array(refs));
+            }
+        }
+    }
+
+    let mut out = Vec::new();
+    doc.save_to(&mut out)?;
+    Ok(out)
+}
+
 // ── Public entry point ────────────────────────────────────────────────────────
 
 pub fn export_pdf(doc: &ParsedDoc, dest: &Path) -> Result<(), Box<dyn std::error::Error>> {
@@ -1004,8 +1119,14 @@ pub fn export_pdf(doc: &ParsedDoc, dest: &Path) -> Result<(), Box<dyn std::error
     }
 
     let headings = r.bookmarks.clone();
+    let slug_to_page: HashMap<String, usize> = headings.iter()
+        .map(|(_, page_num, title)| (heading_slug(title), *page_num))
+        .collect();
+    let link_annotations = std::mem::take(&mut r.link_annotations);
+
     let bytes = r.doc.save_to_bytes()?;
     let bytes = inject_outlines(bytes, &headings)?;
+    let bytes = inject_links(bytes, &link_annotations, &slug_to_page)?;
     std::fs::write(dest, bytes)?;
     Ok(())
 }

@@ -19,6 +19,17 @@ pub fn render_markdown(
     body_font:      &egui::FontFamily,
 ) -> (Option<usize>, Vec<(usize, f32)>, Option<usize>) {
     let footnote_map = &doc.footnote_map;
+
+    // Build slug → block_idx map for anchor link navigation (#section)
+    let anchor_map: HashMap<String, usize> = doc.blocks.iter().enumerate()
+        .filter_map(|(i, b)| {
+            if let Block::Heading(_, inlines) = b {
+                Some((heading_slug(inlines), i))
+            } else {
+                None
+            }
+        })
+        .collect();
     // Capture content width ONCE before any block renders.
     // At this point max_rect still reflects the original content_rect from render_preview.
     // We use this to give every block a fresh bounded max_rect so that overflow from
@@ -63,7 +74,7 @@ pub fn render_markdown(
             block_ui.scroll_to_cursor(Some(egui::Align::TOP));
         }
 
-        render_block(&mut block_ui, block, hl, search_query, search_current, opts, zoom, body_font, &mut occurrence, &mut task_occ, &mut toggled, footnote_map, &mut scroll_request);
+        render_block(&mut block_ui, block, hl, search_query, search_current, opts, zoom, body_font, &mut occurrence, &mut task_occ, &mut toggled, footnote_map, &anchor_map, &mut scroll_request);
 
         // Advance the parent cursor: full rendered height, width clamped to content_w.
         // This prevents layout overflow from ever reaching the parent UI.
@@ -93,6 +104,7 @@ fn render_block(
     task_occ:       &mut usize,
     toggled:        &mut Option<usize>,
     footnote_map:   &HashMap<String, (usize, usize, usize)>,
+    anchor_map:     &HashMap<String, usize>,
     scroll_request: &mut Option<usize>,
 ) {
     match block {
@@ -108,7 +120,7 @@ fn render_block(
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
                 for inline in inlines {
-                    render_inline(ui, inline, Some(size), true, search_query, search_current, opts, zoom, body_font, occurrence, footnote_map, scroll_request);
+                    render_inline(ui, inline, Some(size), true, search_query, search_current, opts, zoom, body_font, occurrence, footnote_map, anchor_map, scroll_request);
                 }
             });
             if *level <= 2 {
@@ -121,7 +133,7 @@ fn render_block(
                 ui.spacing_mut().item_spacing.x = 0.0;
                 ui.spacing_mut().item_spacing.y = 18.0; // Increased line height within paragraphs
                 for inline in inlines {
-                    render_inline(ui, inline, None, false, search_query, search_current, opts, zoom, body_font, occurrence, footnote_map, scroll_request);
+                    render_inline(ui, inline, None, false, search_query, search_current, opts, zoom, body_font, occurrence, footnote_map, anchor_map, scroll_request);
                 }
             });
         }
@@ -272,7 +284,7 @@ fn render_block(
                         ui.visuals_mut().override_text_color =
                             Some(ui.visuals().weak_text_color());
                         for inline in inlines {
-                            render_inline(ui, inline, None, false, search_query, search_current, opts, zoom, body_font, occurrence, footnote_map, scroll_request);
+                            render_inline(ui, inline, None, false, search_query, search_current, opts, zoom, body_font, occurrence, footnote_map, anchor_map, scroll_request);
                         }
                     });
                 });
@@ -322,7 +334,7 @@ fn render_block(
                                 ui.spacing_mut().item_spacing.x = 0.0;
                                 ui.spacing_mut().item_spacing.y = 16.0;
                                 for inline in &item.inlines {
-                                    render_inline(ui, inline, None, false, search_query, search_current, opts, zoom, body_font, occurrence, footnote_map, scroll_request);
+                                    render_inline(ui, inline, None, false, search_query, search_current, opts, zoom, body_font, occurrence, footnote_map, anchor_map, scroll_request);
                                 }
                             });
                         }
@@ -335,7 +347,7 @@ fn render_block(
                         ui.add_space(36.0);
                         ui.vertical(|ui| {
                             for child in &item.children {
-                                render_block(ui, child, hl, search_query, search_current, opts, zoom, body_font, occurrence, task_occ, toggled, footnote_map, scroll_request);
+                                render_block(ui, child, hl, search_query, search_current, opts, zoom, body_font, occurrence, task_occ, toggled, footnote_map, anchor_map, scroll_request);
                             }
                         });
                     });
@@ -426,7 +438,7 @@ fn render_block(
                                                 ui.spacing_mut().item_spacing.y = 0.0;
                                                 let mut o = occ.get();
                                                 for il in header_inlines {
-                                                    render_inline(ui, il, None, true, search_query, search_current, opts, zoom, body_font, &mut o, footnote_map, scroll_request);
+                                                    render_inline(ui, il, None, true, search_query, search_current, opts, zoom, body_font, &mut o, footnote_map, anchor_map, scroll_request);
                                                 }
                                                 occ.set(o);
                                             });
@@ -443,7 +455,7 @@ fn render_block(
                                                         ui.spacing_mut().item_spacing.y = 16.0;
                                                         let mut o = occ.get();
                                                         for il in cell_inlines {
-                                                            render_inline(ui, il, None, false, search_query, search_current, opts, zoom, body_font, &mut o, footnote_map, scroll_request);
+                                                            render_inline(ui, il, None, false, search_query, search_current, opts, zoom, body_font, &mut o, footnote_map, anchor_map, scroll_request);
                                                         }
                                                         occ.set(o);
                                                     });
@@ -475,7 +487,7 @@ fn render_block(
                             .color(ui.visuals().weak_text_color()),
                     );
                     for inline in content {
-                        render_inline(ui, inline, None, false, search_query, search_current, opts, zoom, body_font, occurrence, footnote_map, scroll_request);
+                        render_inline(ui, inline, None, false, search_query, search_current, opts, zoom, body_font, occurrence, footnote_map, anchor_map, scroll_request);
                     }
                     ui.add_space(4.0);
                     let back = ui.add(
@@ -508,6 +520,7 @@ fn render_inline(
     body_font:      &egui::FontFamily,
     occurrence:     &mut usize,
     footnote_map:   &HashMap<String, (usize, usize, usize)>,
+    anchor_map:     &HashMap<String, usize>,
     scroll_request: &mut Option<usize>,
 ) {
     let base = size.unwrap_or(14.0) * zoom;
@@ -626,7 +639,11 @@ fn render_inline(
                 ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
             }
             if (resp.clicked() || ext_clicked) && ui.ctx().input(|i| i.modifiers.ctrl) {
-                let _ = open::that(url.as_str());
+                if let Some(fragment) = url.strip_prefix('#') {
+                    *scroll_request = anchor_map.get(fragment).copied();
+                } else {
+                    let _ = open::that(url.as_str());
+                }
             }
         }
         Inline::Image(url, alt) => {
@@ -804,4 +821,22 @@ fn load_image(path: &str) -> Result<egui::ImageData, String> {
     } else {
         Err("Image path not found or not a file".to_string())
     }
+}
+
+fn heading_slug(inlines: &[Inline]) -> String {
+    let text: String = inlines.iter().map(|i| match i {
+        Inline::Text(s) | Inline::Bold(s) | Inline::Italic(s)
+        | Inline::BoldItalic(s) | Inline::Code(s) => s.as_str(),
+        Inline::Link(t, _) => t.as_str(),
+        Inline::Image(_, alt) => alt.as_str(),
+        Inline::FootnoteRef(_) => "",
+    }).collect();
+    text.to_lowercase()
+        .chars()
+        .filter_map(|c| match c {
+            ' ' | '-' => Some('-'),
+            c if c.is_alphanumeric() => Some(c),
+            _ => None,
+        })
+        .collect()
 }
